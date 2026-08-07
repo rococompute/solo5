@@ -18,13 +18,16 @@ unikernel -- about building Solo5, and running Solo5-based unikernels.
 
 Solo5 itself has the following build dependencies:
 
-* a 64-bit Linux, FreeBSD, OpenBSD or DragonFly system (see also [Supported
-  targets](#supported-targets) for further requirements),
+* a 64-bit Linux, FreeBSD, OpenBSD, DragonFly or macOS system (see also
+  [Supported targets](#supported-targets) for further requirements),
 * a C11 compiler; recent versions of GCC and clang are supported,
 * GNU make,
 * full host system headers (on Linux, kernel headers are not always installed
   by default),
-* on Linux only, pkg-config and libseccomp >= 2.3.3 are required.
+* on Linux only, pkg-config and libseccomp >= 2.3.3 are required,
+* on macOS only, an ELF-capable linker and objcopy, e.g. `brew install lld
+  llvm`. Apple's own Clang can emit the ELF objects a unikernel is built from,
+  but `ld64` cannot link them.
 
 To build Solo5, run:
 
@@ -75,6 +78,18 @@ Experimental:
   for full W^X support.
 * _hvt_: DragonFly nvmm, using `solo5-hvt` as a _tender_, on the x86\_64
   architecture.  DragonFly 6.4 or later is recommended.
+* _hvt_: macOS Hypervisor.framework, using `solo5-hvt` as a _tender_, on the
+  aarch64 (Apple silicon) architecture. macOS 11 or later is required. The
+  tender is ad-hoc code signed at build time with the
+  `com.apple.security.hypervisor` entitlement, without which
+  `Hypervisor.framework` refuses to create a VM; re-signing or stripping the
+  binary drops that entitlement and must be followed by
+  `codesign --force --sign - --entitlements tenders/hvt/solo5-hvt.entitlements`.
+  Two caveats apply: the tender does not yet drop any privileges (macOS has no
+  equivalent of `seccomp`, `pledge(2)` or `capsicum(4)`), and `--net:` accepts
+  only the `@NN` pre-opened file descriptor form, since macOS has no TAP
+  device -- frames must be shuttled by a helper such as `vmnet-helper` or
+  `passt` over a socket passed to the tender.
 * _spt_: Linux systems on the x86\_64, ppc64le, aarch64 and riscv64
   architectures, using `solo5-spt` as a _tender_. A Linux distribution with
   libseccomp >= 2.3.3 is required, or >= 2.5.0 on riscv64.

@@ -92,6 +92,25 @@ else ifeq ($(CONFIG_HOST), DragonFly)
     hvt_SRCS += hvt/hvt_dragonfly.c hvt/hvt_dragonfly_$(CONFIG_HOST_ARCH).c
     all_TARGETS += hvt/solo5-hvt
     HOSTLDLIBS += -lpthread -lnvmm
+else ifeq ($(CONFIG_HOST), Darwin)
+    hvt_SRCS += hvt/hvt_hvf.c hvt/hvt_hvf_$(CONFIG_HOST_ARCH).c
+    all_TARGETS += hvt/solo5-hvt
+    HOSTLDLIBS += -lpthread -framework Hypervisor
+endif
+
+# Hypervisor.framework refuses to create a VM for a process that does not hold
+# the com.apple.security.hypervisor entitlement, and entitlements are only
+# honoured as part of a code signature. An ad-hoc signature ("-") is enough,
+# and survives being install(1)ed.
+ifeq ($(CONFIG_HOST), Darwin)
+define CODESIGN_HVF
+	@echo "CODESIGN $@"
+	codesign --force --sign - \
+	    --entitlements hvt/solo5-hvt.entitlements $@
+endef
+else
+define CODESIGN_HVF
+endef
 endif
 
 # NOTE(dinosaure): here, we construct solo5-hvt with *.o objects and
@@ -109,9 +128,11 @@ hvt/solo5-hvt-debug: HOSTCFLAGS += -DHVT_DROP_PRIVILEGES=0
 
 hvt/solo5-hvt: $(hvt_OBJS) $(common_LIB)
 	$(HOSTLINK)
+	$(CODESIGN_HVF)
 
 hvt/solo5-hvt-debug: $(hvt_debug_OBJS) $(common_LIB)
 	$(HOSTLINK)
+	$(CODESIGN_HVF)
 
 endif # CONFIG_HVT_TENDER
 

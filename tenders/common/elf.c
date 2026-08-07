@@ -28,7 +28,12 @@
 #define _GNU_SOURCE
 #include <assert.h>
 #include <err.h>
+#if defined(__APPLE__)
+/* macOS is a Mach-O platform and ships no <elf.h>; see elf_compat.h. */
+#include "elf_compat.h"
+#else
 #include <elf.h>
+#endif
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -63,6 +68,15 @@
 #define EM_PAGE_SIZE 0x1000
 #else
 #error Unsupported target
+#endif
+
+/*
+ * macOS does not provide the glibc-style __BYTE_ORDER/__LITTLE_ENDIAN pair;
+ * fall back to the compiler-provided equivalents where they are missing.
+ */
+#if !defined(__BYTE_ORDER) && defined(__BYTE_ORDER__)
+#define __BYTE_ORDER    __BYTE_ORDER__
+#define __LITTLE_ENDIAN __ORDER_LITTLE_ENDIAN__
 #endif
 
 #if __BYTE_ORDER == __LITTLE_ENDIAN

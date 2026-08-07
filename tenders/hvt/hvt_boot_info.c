@@ -38,6 +38,8 @@
 #include "hvt_openbsd.h"
 #elif defined(__DragonFly__)
 #include "hvt_dragonfly.h"
+#elif defined(__APPLE__)
+#include "hvt_hvf.h"
 #endif
 
 static void setup_cmdline(uint8_t *cmdline, int argc, char **argv)
@@ -101,7 +103,8 @@ void hvt_boot_info_init(struct hvt *hvt, hvt_gpa_t gpa_kend, int cmdline_argc,
         int ring_active = 0;
 #if defined(__linux__)
         ring_active = hvb->has_ioeventfd && hvb->kick_net_efd != -1;
-#elif defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__DragonFly__)
+#elif defined(__FreeBSD__) || defined(__OpenBSD__) ||                          \
+    defined(__DragonFly__) || defined(__APPLE__)
         ring_active = hvb->kick_net_pipe[0] != -1;
 #endif
         if (ring_active) {

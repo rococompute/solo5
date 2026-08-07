@@ -39,8 +39,18 @@
 #include "hvt.h"
 #include "version.h"
 
+/*
+ * Bounds of the "modules" section populated by DECLARE_MODULE(). GNU ld and
+ * LLD synthesise __start_/__stop_ symbols for named sections; ld64 instead
+ * provides section$start$/section$end$ magic symbols per segment and section.
+ */
+#if defined(__APPLE__)
+extern struct hvt_module __start_modules __asm("section$start$__DATA$modules");
+extern struct hvt_module __stop_modules __asm("section$end$__DATA$modules");
+#else
 extern struct hvt_module __start_modules;
 extern struct hvt_module __stop_modules;
+#endif
 
 static void setup_modules(struct hvt *hvt, struct mft *mft)
 {

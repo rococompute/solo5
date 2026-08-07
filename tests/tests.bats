@@ -52,7 +52,7 @@ setup() {
     Linux)
       [ -c /dev/kvm -a -w /dev/kvm ] || skip "no access to /dev/kvm or not present"
       ;;
-    FreeBSD|OpenBSD)
+    FreeBSD|OpenBSD|Darwin)
       # TODO, just try and run the test anyway
       ;;
     *)

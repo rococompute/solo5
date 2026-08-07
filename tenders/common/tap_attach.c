@@ -55,7 +55,12 @@
 #include <sys/socket.h>
 #include <net/if.h>
 
-#else /* !__linux__ && !__FreeBSD__ && !__OpenBSD__ */
+#elif defined(__APPLE__)
+
+#include <sys/socket.h>
+#include <net/if.h>
+
+#else /* !__linux__ && !__FreeBSD__ && !__OpenBSD__ && !__APPLE__ */
 
 #error Unsupported target
 
@@ -71,6 +76,12 @@ int tap_attach(const char *ifname, int *mtu)
      */
     if (ifname[0] == '@') {
         char *endp;
+        /*
+         * errno is only ever set, never cleared, by the library, so clear it
+         * before using it to carry the outcome of the checks below. Otherwise
+         * a stale value left by any earlier call rejects a perfectly good fd.
+         */
+        errno = 0;
         long int maybe_fd = strtol(&ifname[1], &endp, 10);
         if (*endp != 0 /* Invalid character at (*endp)? */
             || endp == &ifname[1] /* Empty string? */)
@@ -84,12 +95,31 @@ int tap_attach(const char *ifname, int *mtu)
         if (fcntl(fd, F_SETFL, O_NONBLOCK) == -1)
             return -1;
 
+        /*
+         * There is no interface to interrogate for an MTU here -- the fd may
+         * be a socket to a userspace helper rather than anything with a name
+         * -- so report the standard Ethernet MTU and leave it to whoever
+         * passed the descriptor in to match it. Callers reject a negative MTU,
+         * so leaving it untouched would fail the attach outright.
+         */
+        *mtu = 1500;
+
         return fd;
     } else if (strlen(ifname) >= IFNAMSIZ) {
         errno = ENAMETOOLONG;
         return -1;
     }
 
+#if defined(__APPLE__)
+    /*
+     * macOS has no TAP device: the in-kernel utun driver only carries IP
+     * packets, and vmnet(3) is not an fd-per-frame interface. Frames must
+     * therefore be shuttled by a helper (e.g. vmnet-helper, passt) over a
+     * pre-opened socket handed to us with the "@<fd>" syntax handled above.
+     */
+    errno = ENOTSUP;
+    return -1;
+#else
     /*
      * Verify that the interface exists and is up and running. If we don't do
      * this then we get "create on open" behaviour on most systems which is not
@@ -244,6 +274,7 @@ int tap_attach(const char *ifname, int *mtu)
     close(sock);
 
     return fd;
+#endif /* !__APPLE__ */
 }
 
 void tap_attach_genmac(uint8_t *mac)

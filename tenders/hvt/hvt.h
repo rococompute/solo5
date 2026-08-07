@@ -214,6 +214,17 @@ struct hvt_module {
 };
 
 /*
+ * Name of the linker section holding the module descriptors. Mach-O section
+ * names are always qualified by their segment, and the section bounds are
+ * provided by ld64 under different symbol names; see hvt_main.c.
+ */
+#if defined(__APPLE__)
+#define HVT_MODULES_SECTION "__DATA,modules"
+#else
+#define HVT_MODULES_SECTION "modules"
+#endif
+
+/*
  * Declare the module (module_name).
  *
  * Usage:
@@ -225,7 +236,7 @@ struct hvt_module {
  */
 #define DECLARE_MODULE(module_name, ...)                                       \
     static struct hvt_module __module_##module_name                            \
-        __attribute((section("modules"), aligned(8)))                          \
+        __attribute((section(HVT_MODULES_SECTION), aligned(8)))                \
         __attribute((used)) = {.name = #module_name, .ops = {__VA_ARGS__}};
 
 /*

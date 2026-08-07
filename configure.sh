@@ -136,7 +136,9 @@ EOM
 
 ld_is_lld()
 {
-    ${LD} --version 2>&1 | grep -q '^LLD'
+    # Distributors prepend a vendor string to the banner, e.g. Homebrew's
+    # "Homebrew LLD 22.1.8", so don't anchor the match to the start of line.
+    ${LD} --version 2>&1 | grep -Eq '(^|[[:space:]])LLD [0-9]'
 }
 
 # Check that the linker ${LD} is available and suitable for our purposes.
@@ -154,7 +156,7 @@ check_ld()
         echo "yes"
         # LLD < 8 chokes on the Xen ldscript, so refuse to use it.
         printf "%s: Checking if LLD ${LD} is LLVM 8 or newer: " "${prog_NAME}"
-        if ${LD} --version 2>&1 | grep -q '^LLD [1-7]\.'; then
+        if ${LD} --version 2>&1 | grep -Eq '(^|[[:space:]])LLD [1-7]\.'; then
             echo "no"
             return 1
         else
@@ -324,6 +326,19 @@ case ${HOST_CC_MACHINE} in
             echo "#undef HAVE_VMM_H" >tenders/hvt/hvt_openbsd_config.h
         fi
         ;;
+    aarch64-*darwin*|arm64-*darwin*)
+        CONFIG_HOST_ARCH=aarch64 CONFIG_HOST=Darwin
+        CONFIG_HVT_TENDER=1
+        echo "${prog_NAME}: Checking for Hypervisor.framework availability: "
+        if CC="${HOST_CC}" PKG_CFLAGS="" \
+            cc_check_header Hypervisor/Hypervisor.h; then
+            echo "yes"
+        else
+            echo "no"
+            die "Hypervisor.framework is required, please install the" \
+                "macOS SDK (xcode-select --install)"
+        fi
+        ;;
     *)
         die "Unsupported host toolchain: ${HOST_CC_MACHINE}"
         ;;
@@ -412,7 +427,13 @@ fi
 #
 # Configure target toolchain and bindings based on TARGET_{CC,LD,OBJCOPY}.
 #
-TARGET_CC="${TARGET_CC:-cc}"
+if [ "${CONFIG_HOST}" = "Darwin" ]; then
+    # Apple's cc defaults to a Mach-O target, but the same Clang can emit ELF
+    # objects for the unikernel if asked for a bare metal triple.
+    TARGET_CC="${TARGET_CC:-cc --target=aarch64-none-elf}"
+else
+    TARGET_CC="${TARGET_CC:-cc}"
+fi
 
 printf "%s: Checking that ${TARGET_CC} works: " "${prog_NAME}"
 cat >conftmp.c <<EOM
@@ -444,6 +465,15 @@ case ${TARGET_CC_MACHINE} in
         TARGET_ARCH=aarch64
         TARGET_LD_MAX_PAGE_SIZE=0x1000
         CONFIG_HVT=1 CONFIG_SPT=1
+        if [ "${CONFIG_HOST}" = "Darwin" ]; then
+            # spt is Linux-only, and there is no seccomp on macOS.
+            CONFIG_SPT=
+            # Align guest ELF segments to the macOS/aarch64 host page size.
+            # Both mprotect() and hv_vm_protect() work at that granularity, so
+            # 4k-aligned segments leave the hvt tender unable to apply
+            # per-segment page protections; see hvt_guest_mprotect().
+            TARGET_LD_MAX_PAGE_SIZE=0x4000
+        fi
         ;;
     powerpc64le-*|ppc64le-*)
         TARGET_ARCH=ppc64le
@@ -541,6 +571,19 @@ case ${CONFIG_HOST} in
                 err "gcc version ${major_version} of ${TARGET_CC} unsupported on DragonFly"
                 die "gcc 9+ or clang required on DragonFly"
             fi
+        fi
+        ;;
+    Darwin)
+        # Apple ships no ELF-capable linker or objcopy; LLVM's (e.g. from
+        # Homebrew) are drop-in replacements. As on Linux, suppress the
+        # .note.gnu.build-id that our linker scripts do not cater for.
+        TARGET_LD="${TARGET_LD:-ld.lld}"
+        TARGET_OBJCOPY="${TARGET_OBJCOPY:-llvm-objcopy}"
+        TARGET_CC_LDFLAGS="-Wl,--build-id=none"
+        if ! LD="${TARGET_LD}" ld_is_lld; then
+            err "${TARGET_LD} is not LLVM LLD"
+            die "An ELF-capable linker is required on macOS, e.g." \
+                "'brew install lld'"
         fi
         ;;
     *)
