@@ -171,6 +171,8 @@ solo5_xen.o: $(xen_OBJS)
 CPPFLAGS+=-D__XEN_INTERFACE_VERSION__=__XEN_LATEST_INTERFACE_VERSION__
 endif
 
+noexecstack_GEN := noexecstack.c noexecstack.s noexecstack.h
+
 noexecstack.c:
 	@echo GEN noexecstack.c
 	printf 'int f() {\n  return 0;\n}\n' > $@
@@ -190,6 +192,6 @@ all_DEPS := $(patsubst %.o,%.d,$(all_OBJS))
 .PHONY: clean
 clean:
 	@echo "CLEAN bindings"
-	$(RM) $(all_TARGETS) $(all_OBJS) $(all_DEPS)
+	$(RM) $(all_TARGETS) $(all_OBJS) $(all_DEPS) $(noexecstack_GEN)
 
 include $(wildcard $(all_DEPS))

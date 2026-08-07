@@ -2,6 +2,9 @@
 *.d
 *.a
 *.pc
+bindings/noexecstack.c
+bindings/noexecstack.h
+bindings/noexecstack.s
 Makeconf
 Makeconf.sh
 tags
