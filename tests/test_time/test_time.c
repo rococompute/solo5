@@ -56,12 +56,15 @@ int solo5_app_main(const struct solo5_start_info *si __attribute__((unused)))
      * Verify that monotonic time is passing
      */
     solo5_time_t ta, tb;
-    int iters = 5;
+    int iters = 100000;
     ta = solo5_clock_monotonic();
     tb = solo5_clock_monotonic();
     /*
      * Adjacent calls to solo5_clock_monotonic() may return the same time count
-     * on aarch64 systems, so give it a few extra iterations to change.
+     * on aarch64 systems, so give it extra iterations to change. The budget
+     * has to cover the coarsest counter we expect to meet: Apple silicon
+     * clocks cntvct_el0 at 24 MHz, i.e. one tick per ~41.7ns, which a core
+     * several GHz faster gets through in far more than a handful of calls.
      */
     while (ta == tb && iters--)
         tb = solo5_clock_monotonic();
