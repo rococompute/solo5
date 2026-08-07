@@ -125,7 +125,7 @@ SECTIONS {
         _stdata = .;
         *(.tdata)
         . = ALIGN(CONSTANT(MAXPAGESIZE));
-    } :tdata
+    } :tdata :tbss
 
     /*
      * _edata is the address of the end of the area to be copied with multiboot
