@@ -603,7 +603,10 @@ case ${CONFIG_HOST} in
                 die "llvm-objcopy not found. It is required on macOS:" \
                     "run 'brew install llvm', or set TARGET_OBJCOPY."
         fi
-        TARGET_CC_LDFLAGS="-Wl,--build-id=none"
+        # Clang's bare-metal driver passes -static to the linker as -Bstatic
+        # *after* the user's arguments, so -lfoo would still find a libfoo.so
+        # first. Ask for static library search up front.
+        TARGET_CC_LDFLAGS="-Wl,--build-id=none -Wl,-Bstatic"
         if ! LD="${TARGET_LD}" ld_is_lld; then
             err "${TARGET_LD} is not LLVM LLD"
             die "An ELF-capable linker is required on macOS, e.g." \
