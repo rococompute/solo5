@@ -37,5 +37,18 @@ $(TESTDIRS):
 	@echo "MAKE $@"
 	$(MAKE) -C $@ $(MAKECMDGOALS) $(SUBOVERRIDE)
 
+# netpeer is a host tool, used by the net tests on hosts without tap devices.
+all: netpeer/netpeer
+
+netpeer/netpeer: netpeer/netpeer.c
+	@echo "HOSTCC $@"
+	$(CONFIG_HOST_CC) -O2 -Wall -o $@ $<
+
+clean: clean_netpeer
+
+.PHONY: clean_netpeer
+clean_netpeer:
+	$(RM) netpeer/netpeer
+
 .SUFFIXES:
 $(V).SILENT:

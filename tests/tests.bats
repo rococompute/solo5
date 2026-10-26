@@ -180,6 +180,20 @@ expect_success() {
   [ "$status" -eq 0 ] && [[ "$output" == *"SUCCESS"* ]]
 }
 
+# Hosts without tap devices (macOS) run the net tests behind netpeer, which
+# hands the tender socketpair fds @3, @4, ... and plays the pinging host.
+use_netpeer() {
+  [ "${CONFIG_HOST}" = "Darwin" ]
+}
+
+netpeer_hvt_run() {
+  local netpeer_args=()
+  while [ "$1" != "--" ]; do netpeer_args+=("$1"); shift; done
+  shift
+  run ${TIMEOUT} --foreground 60s netpeer/netpeer "${netpeer_args[@]}" -- \
+    "${HVT_TENDER}" --mem=4096 "$@"
+}
+
 guest_mem_mb() {
   echo "$output" | sed -n 's/^Solo5: Memory map: \([0-9][0-9]*\) MB addressable.*/\1/p'
 }
@@ -608,10 +622,14 @@ xen_expect_abort() {
 }
 
 @test "net hvt" {
-  skip_unless_root
-
-  ( sleep 1; ${TIMEOUT} 60s ping -fq -c 100000 ${NET0_IP} ) &
-  hvt_run --net:service0=${NET0} -- test_net/test_net.hvt limit
+  if use_netpeer; then
+    netpeer_hvt_run -n 1 -c 100000 -- \
+      --net:service0=@3 -- test_net/test_net.hvt limit
+  else
+    skip_unless_root
+    ( sleep 1; ${TIMEOUT} 60s ping -fq -c 100000 ${NET0_IP} ) &
+    hvt_run --net:service0=${NET0} -- test_net/test_net.hvt limit
+  fi
   expect_success
 }
 
@@ -632,13 +650,18 @@ xen_expect_abort() {
 }
 
 @test "net_2if hvt" {
-  skip_unless_root
-  [ "${CONFIG_HOST}" = "OpenBSD" ] && skip "breaks on OpenBSD due to #374"
+  if use_netpeer; then
+    netpeer_hvt_run -n 2 -- \
+      --net:service0=@3 --net:service1=@4 -- test_net_2if/test_net_2if.hvt limit
+  else
+    skip_unless_root
+    [ "${CONFIG_HOST}" = "OpenBSD" ] && skip "breaks on OpenBSD due to #374"
 
-  ( sleep 1; ${TIMEOUT} 60s ping -fq -c 50000 ${NET0_IP} ) &
-  ( sleep 1; ${TIMEOUT} 60s ping -fq -c 50000 ${NET1_IP} ) &
-  hvt_run --net:service0=${NET0} --net:service1=${NET1} -- \
-      test_net_2if/test_net_2if.hvt limit
+    ( sleep 1; ${TIMEOUT} 60s ping -fq -c 50000 ${NET0_IP} ) &
+    ( sleep 1; ${TIMEOUT} 60s ping -fq -c 50000 ${NET1_IP} ) &
+    hvt_run --net:service0=${NET0} --net:service1=${NET1} -- \
+        test_net_2if/test_net_2if.hvt limit
+  fi
   expect_success
 }
 
@@ -664,8 +687,13 @@ xen_expect_abort() {
 }
 
 @test "net_mtu hvt" {
-  skip_unless_root
-  hvt_run --net:service0=${NET2} -- test_net_mtu/test_net_mtu.hvt
+  if use_netpeer; then
+    netpeer_hvt_run -n 1 -c 0 -- \
+      --net:service0=@3 --net-mtu:service0=9000 -- test_net_mtu/test_net_mtu.hvt
+  else
+    skip_unless_root
+    hvt_run --net:service0=${NET2} -- test_net_mtu/test_net_mtu.hvt
+  fi
   [[ "$output" == *"MTU is 9000"* ]]
   expect_success
 }
@@ -685,11 +713,16 @@ xen_expect_abort() {
 }
 
 @test "net_ring hvt" {
-  skip_unless_root
-  skip_unless_host_is Linux
+  if use_netpeer; then
+    netpeer_hvt_run -n 1 -p deadbeef -- \
+      --net:service0=@3 -- test_net_ring/test_net_ring.hvt
+  else
+    skip_unless_root
+    skip_unless_host_is Linux
 
-  ( sleep 1; ${TIMEOUT} 60s ping -fq -c 10000 -p deadbeef ${NET0_IP} ) &
-  hvt_run --net:service0=${NET0} -- test_net_ring/test_net_ring.hvt
+    ( sleep 1; ${TIMEOUT} 60s ping -fq -c 10000 -p deadbeef ${NET0_IP} ) &
+    hvt_run --net:service0=${NET0} -- test_net_ring/test_net_ring.hvt
+  fi
   expect_success
 }
 
@@ -702,16 +735,22 @@ xen_expect_abort() {
 }
 
 @test "net_ring memory hvt" {
-  skip_unless_root
   local mem=32
+  local peer=() net=--net:service0=${NET2}
+  if use_netpeer; then
+    peer=(netpeer/netpeer -n 1 -c 0 --)
+    net=--net:service0=@3
+  else
+    skip_unless_root
+  fi
 
-  run ${TIMEOUT} --foreground 60s "${HVT_TENDER}" --mem=${mem} \
-    --net:service0=${NET2} -- test_net_mtu/test_net_mtu.hvt
+  run ${TIMEOUT} --foreground 60s "${peer[@]}" "${HVT_TENDER}" --mem=${mem} \
+    ${net} -- test_net_mtu/test_net_mtu.hvt
   expect_success
   local with_ring=$(guest_mem_mb)
 
-  run ${TIMEOUT} --foreground 60s "${HVT_TENDER}" --mem=${mem} --no-net-ring \
-    --net:service0=${NET2} -- test_net_mtu/test_net_mtu.hvt
+  run ${TIMEOUT} --foreground 60s "${peer[@]}" "${HVT_TENDER}" --mem=${mem} \
+    --no-net-ring ${net} -- test_net_mtu/test_net_mtu.hvt
   expect_success
   local without_ring=$(guest_mem_mb)
 
