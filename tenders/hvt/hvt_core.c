@@ -40,6 +40,7 @@
 #if defined(__linux__)
 
 #include <sys/epoll.h>
+#include <sys/random.h>
 #include <sys/timerfd.h>
 
 #elif defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__DragonFly__) || \
@@ -56,6 +57,7 @@
 #endif
 
 #include "hvt.h"
+#include "solo5.h"
 
 hvt_hypercall_fn_t hvt_core_hypercalls[HVT_HYPERCALL_MAX] = {0};
 
@@ -288,6 +290,49 @@ static void hypercall_poll(struct hvt *hvt, hvt_gpa_t gpa)
     t->ret = nrevents;
 }
 
+static int random_disabled;
+
+void hvt_core_disable_random(void)
+{
+    random_disabled = 1;
+}
+
+static void fill_random(uint8_t *buf, size_t len)
+{
+#if defined(__linux__)
+    while (len > 0) {
+        ssize_t nr = getrandom(buf, len, 0);
+        if (nr == -1) {
+            if (errno == EINTR)
+                continue;
+            err(1, "getrandom() failed");
+        }
+        buf += nr;
+        len -= nr;
+    }
+#else
+    arc4random_buf(buf, len);
+#endif
+}
+
+static void hypercall_random(struct hvt *hvt, hvt_gpa_t gpa)
+{
+    struct hvt_hc_random *r =
+        HVT_CHECKED_GPA_P(hvt, gpa, sizeof(struct hvt_hc_random));
+    size_t len = r->len;
+
+    if (len == 0) {
+        r->ret = SOLO5_R_OK;
+        return;
+    }
+    if (len > HVT_RANDOM_MAX) {
+        r->ret = SOLO5_R_EINVAL;
+        return;
+    }
+    fill_random(HVT_CHECKED_GPA_P(hvt, r->data, len), len);
+    r->ret = SOLO5_R_OK;
+}
+
 static int setup(struct hvt *hvt, struct mft *mft)
 {
     if (waitsetfd == -1)
@@ -299,6 +344,9 @@ static int setup(struct hvt *hvt, struct mft *mft)
            0);
     assert(hvt_core_register_hypercall(HVT_HYPERCALL_POLL, hypercall_poll) ==
            0);
+    if (!random_disabled)
+        assert(hvt_core_register_hypercall(HVT_HYPERCALL_RANDOM,
+                                           hypercall_random) == 0);
 
     return 0;
 }

@@ -47,4 +47,11 @@ solo5_time_t solo5_clock_wall(void)
     return (ts.tv_sec * NSEC_PER_SEC) + ts.tv_nsec;
 }
 
+solo5_result_t solo5_random(uint8_t *buf, size_t size)
+{
+    (void)buf;
+    (void)size;
+    return SOLO5_R_EUNSPEC;
+}
+
 /* solo5_set_tls_base is in tls.c */

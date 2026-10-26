@@ -208,6 +208,27 @@ solo5_time_t solo5_clock_monotonic(void);
 solo5_time_t solo5_clock_wall(void);
 
 /*
+ * Fills (buf, size) with bytes from the host's cryptographically secure
+ * random number generator. (size) may be at most 4096 bytes; split larger
+ * requests.
+ *
+ * Returns SOLO5_R_OK on success, SOLO5_R_EINVAL if (size) is too large, and
+ * SOLO5_R_EUNSPEC if the host provides no random bytes (targets other than
+ * hvt, or an hvt tender without this feature). Applications should then fall
+ * back to their own entropy sources.
+ *
+ * Unlike the general rule above, implementations MUST return rather than
+ * abort when random bytes are unavailable.
+ */
+solo5_result_t solo5_random(uint8_t *buf, size_t size);
+
+/*
+ * Defined if this solo5.h declares solo5_random(), so that code can be built
+ * against older Solo5 headers too.
+ */
+#define SOLO5_HAVE_RANDOM 1
+
+/*
  * Type for I/O handles.
  */
 typedef uint64_t solo5_handle_t;

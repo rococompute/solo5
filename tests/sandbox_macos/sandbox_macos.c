@@ -39,6 +39,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/event.h>
+#include <sys/random.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/wait.h>
@@ -76,7 +77,16 @@ int main(int argc, char **argv)
     if (hvt_sandbox_macos_enter() == -1)
         errx(1, "hvt_sandbox_macos_enter() failed");
 
-    /* Must keep working. */
+    /*
+     * Must keep working. The random hypercall is served with arc4random_buf(),
+     * and this is its first use in this process, as in the tender.
+     */
+    unsigned char r1[16] = {0}, r2[16] = {0}, zero[16] = {0};
+    arc4random_buf(r1, sizeof r1);
+    arc4random_buf(r2, sizeof r2);
+    expect("arc4random_buf",
+           memcmp(r1, zero, sizeof r1) != 0 && memcmp(r1, r2, sizeof r1) != 0);
+    expect("getentropy", getentropy(r1, sizeof r1) == 0);
     char buf[512];
     memset(buf, 0xa5, sizeof buf);
     expect("pwrite on pre-opened block fd", pwrite(blk, buf, 512, 512) == 512);

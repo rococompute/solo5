@@ -189,6 +189,12 @@ static inline void hvt_ring_kick(int ring_id)
  * Feature flags for host/guest negotiation.
  */
 #define HVT_FEATURE_RING_IO (1U << 0)
+/*
+ * The tender serves HVT_HYPERCALL_RANDOM. Guests MUST NOT issue that
+ * hypercall unless this bit is set: tenders without it treat the hypercall
+ * as invalid and stop the guest.
+ */
+#define HVT_FEATURE_RANDOM (1U << 1)
 
 /*
  * A pointer to this structure is passed by the tender as the sole argument to
@@ -231,6 +237,11 @@ enum hvt_hypercall {
     HVT_HYPERCALL_NET_WRITE,
     HVT_HYPERCALL_NET_READ,
     HVT_HYPERCALL_HALT,
+    /*
+     * Hypercalls below are appended to the ABI v2 set. Each one is only
+     * served when its HVT_FEATURE_* bit is set in host_features.
+     */
+    HVT_HYPERCALL_RANDOM,
     HVT_HYPERCALL_MAX
 };
 
@@ -329,6 +340,24 @@ struct hvt_hc_halt {
 
     /* IN */
     int exit_status;
+};
+
+/*
+ * HVT_HYPERCALL_RANDOM: Fill (data, len) with bytes from the host CSPRNG.
+ *
+ * Only available if the tender sets HVT_FEATURE_RANDOM. (len) may be at most
+ * HVT_RANDOM_MAX; larger requests return SOLO5_R_EINVAL and leave (data)
+ * untouched.
+ */
+#define HVT_RANDOM_MAX 4096
+
+struct hvt_hc_random {
+    /* IN */
+    HVT_GUEST_PTR(void *) data;
+    size_t len;
+
+    /* OUT */
+    int ret;
 };
 
 #endif /* HVT_ABI_H */

@@ -538,6 +538,27 @@ xen_expect_abort() {
   expect_success
 }
 
+@test "random hvt" {
+  hvt_run test_random/test_random.hvt
+  expect_success
+  FIRST=$(echo "$output" | grep '^first: ')
+  # A second boot must not repeat the first one's bytes.
+  hvt_run test_random/test_random.hvt
+  expect_success
+  [ "$(echo "$output" | grep '^first: ')" != "${FIRST}" ]
+}
+
+@test "random --no-random hvt" {
+  hvt_run --no-random -- test_random/test_random.hvt fallback
+  expect_success
+  [[ "$output" == *"fallback"* ]]
+}
+
+@test "random spt" {
+  spt_run -- test_random/test_random.spt fallback
+  expect_success
+}
+
 @test "sandbox hvt" {
   skip_unless_host_is Darwin
   setup_block
@@ -648,6 +669,41 @@ hostile_run() {
   hostile_run beyond_ram
   [[ "${REPORT_JSON}" == *'"kind":"guest_abort"'* ]]
   [ "$status" -eq 255 ]
+}
+
+@test "hostile random_bad_gpa hvt" {
+  skip_unless_host_is Darwin
+  hostile_run random_bad_gpa
+  [[ "${REPORT_JSON}" == *'"kind":"fault"'* ]]
+  [[ "${REPORT_JSON}" == *'"reason":"invalid_access"'* ]]
+  [ "$status" -eq 1 ]
+}
+
+@test "hostile random_wrap hvt" {
+  skip_unless_host_is Darwin
+  hostile_run random_wrap
+  [[ "${REPORT_JSON}" == *'"kind":"fault"'* ]]
+  [[ "${REPORT_JSON}" == *'"reason":"invalid_access"'* ]]
+  [ "$status" -eq 1 ]
+}
+
+@test "hostile random_unoffered hvt" {
+  skip_unless_host_is Darwin
+  hostile_run random_unoffered
+  [[ "${REPORT_JSON}" == *'"kind":"guest_exit"'* ]]
+  expect_success
+}
+
+@test "hostile random_unoffered --no-random hvt" {
+  skip_unless_host_is Darwin
+  REPORT=${BATS_TMPDIR}/exit-report.json
+  run ${TIMEOUT} --foreground 60s "${HVT_TENDER}" --mem=32 --no-random \
+    --exit-report=3 -- test_hostile/test_hostile.hvt random_unoffered 3>${REPORT}
+  REPORT_JSON=$(cat ${REPORT})
+  echo "exit report: ${REPORT_JSON}"
+  [[ "${REPORT_JSON}" == *'"kind":"fault"'* ]]
+  [[ "${REPORT_JSON}" == *'"reason":"invalid_access"'* ]]
+  [ "$status" -eq 1 ]
 }
 
 @test "hostile hypercall_wzr hvt" {

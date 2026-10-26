@@ -35,6 +35,13 @@ solo5_time_t solo5_clock_wall(void)
     return pvclock_monotonic() + pvclock_epochoffset();
 }
 
+solo5_result_t solo5_random(uint8_t *buf, size_t size)
+{
+    (void)buf;
+    (void)size;
+    return SOLO5_R_EUNSPEC;
+}
+
 /*
  * Called in interrupt context.
  */

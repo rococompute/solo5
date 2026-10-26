@@ -44,6 +44,16 @@ static void puts(const char *s)
 #define HYPERCALL(n)      (HYPERCALL_BASE + ((n) << 3))
 #define HYPERCALL_WALLTIME 1
 #define HYPERCALL_NET_READ 7
+#define HYPERCALL_RANDOM   9
+
+/* struct hvt_hc_random */
+struct hc_random {
+    uint64_t data;
+    uint64_t len;
+    int ret;
+};
+static struct hc_random hc_random;
+static uint8_t random_buf[32];
 
 static void store32(uint64_t addr, uint32_t v)
 {
@@ -99,6 +109,27 @@ static bool run_case(const char *c)
     } else if (!strcmp(c, "console_overflow")) {
         /* A length that runs off the end of guest memory. */
         solo5_console_write("x", 0x7ffffff0);
+    } else if (!strcmp(c, "random_bad_gpa")) {
+        /* RANDOM into a buffer beyond guest memory. */
+        hc_random.data = 0xfffffff0;
+        hc_random.len = 32;
+        store32(HYPERCALL(HYPERCALL_RANDOM), (uint32_t)(uintptr_t)&hc_random);
+    } else if (!strcmp(c, "random_wrap")) {
+        /* RANDOM whose buffer wraps around the end of the address space. */
+        hc_random.len = 4096;
+        hc_random.data = ~0ULL - 8;
+        store32(HYPERCALL(HYPERCALL_RANDOM), (uint32_t)(uintptr_t)&hc_random);
+    } else if (!strcmp(c, "random_unoffered")) {
+        /*
+         * A valid RANDOM request that ignores the feature bit. Served by
+         * default; under --no-random it must be stopped like on a tender
+         * that does not know the hypercall.
+         */
+        hc_random.data = (uint64_t)(uintptr_t)random_buf;
+        hc_random.len = sizeof random_buf;
+        hc_random.ret = -1;
+        store32(HYPERCALL(HYPERCALL_RANDOM), (uint32_t)(uintptr_t)&hc_random);
+        return hc_random.ret == SOLO5_R_OK;
     } else if (!strcmp(c, "hypercall_wzr")) {
         /*
          * A legitimate hypercall whose argument register is the zero

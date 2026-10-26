@@ -299,6 +299,17 @@ solo5-hvt --mem=64 --cpu-limit=30 --exit-report=3 -- unikernel.hvt 3>report.json
 **Time.** The guest's cycle counter (`cntvct_el0`) runs at 24 MHz on Apple
 silicon, and is reported to the guest as such.
 
+**Randomness.** Apple silicon has no RNG instruction, and a 24 MHz counter
+is a poor source of timing jitter, so the tender gives guests random bytes
+from the host: `solo5_random()` is served from `arc4random_buf()` (from
+`getrandom()` on Linux), which keeps working inside the sandbox. The tender
+advertises this with the `HVT_FEATURE_RANDOM` boot-info bit, and a guest
+uses it only when that bit is set. A guest built against these headers
+therefore still runs on a tender without the feature, where
+`solo5_random()` returns `SOLO5_R_EUNSPEC` and the guest uses its own
+entropy sources. `--no-random` makes the tender behave like one without the
+feature.
+
 The test suite runs unprivileged on macOS: the network tests use
 `tests/netpeer`, which plays the host's side of a socketpair instead of a tap
 interface, so `tests/setup-tests.sh` is not needed.

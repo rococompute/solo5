@@ -187,6 +187,12 @@ extern hvt_hypercall_fn_t hvt_core_hypercalls[];
 int hvt_core_hypercall_halt(struct hvt *hvt, hvt_gpa_t gpa);
 
 /*
+ * Do not serve HVT_HYPERCALL_RANDOM, as tenders without it do not. Must be
+ * called before modules are set up.
+ */
+void hvt_core_disable_random(void);
+
+/*
  * Register a custom vmexit handler (fn). (fn) must return 0 if the vmexit was
  * handled, -1 if not.
  */

@@ -294,6 +294,8 @@ static void usage(const char *prog)
     fprintf(stderr, "Core options:\n");
     fprintf(stderr, "  [ --mem=512 ] (guest memory in MB)\n");
     fprintf(stderr, "  [ --no-net-ring ] (disable the net ring buffer)\n");
+    fprintf(stderr, "  [ --no-random ] (do not give the guest host random"
+                    " bytes)\n");
     fprintf(stderr, "  [ --cpu-limit=SECONDS ] (limit CPU time used)\n");
     fprintf(stderr, "  [ --exit-report=FD ] (write a JSON exit report to FD)\n");
     fprintf(stderr, "    --help (display this help)\n");
@@ -429,6 +431,12 @@ int main(int argc, char **argv)
         }
         if (strncmp("--no-net-ring", *argv, sizeof("--no-net-ring")) == 0) {
             no_net_ring = 1;
+            argc--;
+            argv++;
+            continue;
+        }
+        if (strcmp("--no-random", *argv) == 0) {
+            hvt_core_disable_random();
             argc--;
             argv++;
             continue;

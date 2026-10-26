@@ -98,6 +98,9 @@ void hvt_boot_info_init(struct hvt *hvt, hvt_gpa_t gpa_kend, int cmdline_argc,
     bi->guest_features = 0;
     bi->net_ring = 0;
 
+    if (hvt_core_hypercalls[HVT_HYPERCALL_RANDOM] != NULL)
+        bi->host_features |= HVT_FEATURE_RANDOM;
+
     {
         struct hvt_b *hvb = hvt->b;
         int ring_active = 0;

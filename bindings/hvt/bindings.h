@@ -35,6 +35,7 @@ void time_init(const struct hvt_boot_info *bi);
 void console_init(void);
 void net_init(const struct hvt_boot_info *bi);
 void block_init(const struct hvt_boot_info *bi);
+void random_init(const struct hvt_boot_info *bi);
 
 /* tscclock.c: TSC-based clock */
 uint64_t tscclock_monotonic(void);
