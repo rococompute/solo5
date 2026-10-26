@@ -468,11 +468,6 @@ case ${TARGET_CC_MACHINE} in
         if [ "${CONFIG_HOST}" = "Darwin" ]; then
             # spt is Linux-only, and there is no seccomp on macOS.
             CONFIG_SPT=
-            # Align guest ELF segments to the macOS/aarch64 host page size.
-            # Both mprotect() and hv_vm_protect() work at that granularity, so
-            # 4k-aligned segments leave the hvt tender unable to apply
-            # per-segment page protections; see hvt_guest_mprotect().
-            TARGET_LD_MAX_PAGE_SIZE=0x4000
         fi
         ;;
     powerpc64le-*|ppc64le-*)

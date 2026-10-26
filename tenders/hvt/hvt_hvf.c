@@ -25,7 +25,8 @@
 
 #include <assert.h>
 #include <err.h>
-#include <stdbool.h>
+#include <errno.h>
+#include <inttypes.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
@@ -33,6 +34,9 @@
 
 #include "hvt.h"
 #include "hvt_hvf.h"
+
+/* Stage 2 granule requested in hvt_init(); see there. */
+#define HVF_IPA_GRANULE_SIZE 0x1000UL
 
 struct hvt *hvt_init(size_t mem_size)
 {
@@ -48,16 +52,40 @@ struct hvt *hvt_init(size_t mem_size)
     memset(hvb, 0, sizeof(struct hvt_b));
 
     /*
+     * Solo5 aarch64 guests are linked with 4 KiB aligned segments, but HVF
+     * defaults to the 16 KiB host page size for stage 2. Ask for a 4 KiB IPA
+     * granule so that hvt_guest_mprotect() can protect each segment exactly.
+     * The public API for this first appeared in macOS 26.
+     */
+    hv_vm_config_t config = NULL;
+    if (__builtin_available(macOS 26.0, *)) {
+        config = hv_vm_config_create();
+        if (config == NULL)
+            errx(1, "HVF: hv_vm_config_create() failed");
+        ret = hv_vm_config_set_ipa_granule(config, HV_IPA_GRANULE_4KB);
+        if (ret != HV_SUCCESS)
+            errx(1, "HVF: hv_vm_config_set_ipa_granule(4KB) failed: 0x%x",
+                 ret);
+    } else {
+        errx(1, "HVF: macOS 26 or newer is required (for a 4 KiB IPA "
+                "granule)");
+    }
+
+    /*
      * Creating a VM requires the com.apple.security.hypervisor entitlement;
      * the tender is ad-hoc code signed with it at build time. A tender that
      * lost its signature (e.g. after strip(1)) fails here rather than anywhere
      * more subtle, so say so.
      */
-    ret = hv_vm_create(NULL);
+    ret = hv_vm_create(config);
+    os_release(config);
+    if (ret == HV_DENIED)
+        errx(1, "HVF: hv_vm_create() was denied. The tender must be code "
+                "signed with the com.apple.security.hypervisor entitlement; "
+                "re-sign it with: codesign --force --sign - --entitlements "
+                "solo5-hvt.entitlements <path to solo5-hvt>");
     if (ret != HV_SUCCESS)
-        errx(1, "HVF: hv_vm_create() failed: 0x%x. Is the tender code signed "
-                "with the com.apple.security.hypervisor entitlement?",
-             ret);
+        errx(1, "HVF: hv_vm_create() failed: 0x%x", ret);
 
     /*
      * (dinosaure, 2026-05-20): The unikernel's memory zone is set to 0, see
@@ -118,53 +146,27 @@ int hvt_guest_mprotect(void *t_arg, uint64_t addr_start, uint64_t addr_end,
     assert(size > 0 && size <= hvt->guest_mem_size);
 
     /*
-     * Both mprotect() and hv_vm_protect() operate at host page granularity,
-     * which is 16k on Apple silicon, whereas ELF segments are only guaranteed
-     * to be aligned to the 4k architectural page size. Rounding the range
-     * outward would let one segment's protections spill onto its neighbour's
-     * page -- taking execute permission away from the tail of .text when
-     * .rodata follows it, for instance -- so refuse to guess instead.
-     *
-     * Unikernels linked on macOS get -z max-page-size=0x4000 (see
-     * configure.sh) and land here fully aligned; ones built elsewhere run
-     * unhardened.
-     */
-    static bool warned_unaligned = false;
-    size_t page_size = (size_t)getpagesize();
-    if ((addr_start & (page_size - 1)) || (addr_end & (page_size - 1))) {
-        if (!warned_unaligned) {
-            warnx("Executable segments are not aligned to the host page size "
-                  "(%zu bytes); page protections will not be applied",
-                  page_size);
-            warned_unaligned = true;
-        }
-        return 0;
-    }
-
-    uint8_t *vaddr_start = hvt->mem + addr_start;
-    assert(vaddr_start >= hvt->mem);
-
-    /*
      * Host-side page protections:
      *
-     * Ensure that guest-executable pages are not also executable but are
-     * readable in the host.
-     */
-    int host_prot = prot;
-    if (host_prot & PROT_EXEC) {
-        host_prot &= ~(PROT_EXEC);
-        host_prot |= PROT_READ;
-    }
-    if (mprotect(vaddr_start, size, host_prot) == -1)
-        return -1;
-
-    /*
+     * None. Guest memory stays PROT_READ | PROT_WRITE (never PROT_EXEC) in
+     * the host for the lifetime of the tender. Host pages are 16 KiB, so
+     * mprotect() could not follow 4 KiB segment boundaries anyway, and HVF
+     * stage 2 permissions do not depend on the host mapping.
+     *
      * Guest-side page protections:
      *
-     * Unlike KVM, HVF keeps stage 2 permissions independent of the host
-     * mapping, so apply them explicitly. Note that guest-side X/NX is honoured
-     * here, in contrast to the other backends.
+     * Applied at stage 2 with the 4 KiB IPA granule set up in hvt_init(), so
+     * every segment gets exactly its own permissions. Unlike on KVM, guest
+     * X/NX is enforced too, as is execute-only.
      */
+    if ((addr_start & (HVF_IPA_GRANULE_SIZE - 1)) ||
+        (addr_end & (HVF_IPA_GRANULE_SIZE - 1))) {
+        warnx("HVF: segment [0x%" PRIx64 ", 0x%" PRIx64 ") is not 4 KiB "
+              "aligned",
+              addr_start, addr_end);
+        errno = EINVAL;
+        return -1;
+    }
     hv_memory_flags_t flags = 0;
     if (prot & PROT_READ)
         flags |= HV_MEMORY_READ;

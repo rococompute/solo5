@@ -52,8 +52,15 @@ setup() {
     Linux)
       [ -c /dev/kvm -a -w /dev/kvm ] || skip "no access to /dev/kvm or not present"
       ;;
-    FreeBSD|OpenBSD|Darwin)
+    FreeBSD|OpenBSD)
       # TODO, just try and run the test anyway
+      ;;
+    Darwin)
+      [ "$(sysctl -n kern.hv_support 2>/dev/null)" = "1" ] || \
+        skip "Hypervisor.framework not available (kern.hv_support != 1)"
+      codesign -d --entitlements - ../tenders/hvt/solo5-hvt 2>&1 | \
+        grep -q com.apple.security.hypervisor || \
+        skip "solo5-hvt is not signed with the hypervisor entitlement"
       ;;
     *)
       skip "Don't know how to run ${BATS_TEST_NAME} on ${CONFIG_HOST}"
@@ -355,13 +362,13 @@ xen_expect_abort() {
 }
 
 @test "rnow hvt" {
-  skip_unless_host_is OpenBSD
+  skip_unless_host_is OpenBSD Darwin
   hvt_run test_rnow/test_rnow.hvt
   [ "$status" -eq 1 ] && [[ "$output" == *"host/guest translation fault"* ]]
 }
 
 @test "xnow hvt" {
-  skip_unless_host_is Linux OpenBSD
+  skip_unless_host_is Linux OpenBSD Darwin
 
   hvt_run test_xnow/test_xnow.hvt
   [ "$status" -eq 1 ] && [[ "$output" == *"host/guest translation fault"* ]]
@@ -378,20 +385,20 @@ xen_expect_abort() {
 }
 
 @test "xnor hvt" {
-  skip_unless_host_is OpenBSD
+  skip_unless_host_is OpenBSD Darwin
   hvt_run test_xnor/test_xnor.hvt
   [ "$status" -eq 1 ] && [[ "$output" == *"host/guest translation fault"* ]]
 }
 
 @test "rnox hvt" {
-  skip_unless_host_is OpenBSD
+  skip_unless_host_is OpenBSD Darwin
 
   hvt_run test_rnox/test_rnox.hvt
   [ "$status" -eq 1 ] && [[ "$output" == *"host/guest translation fault"* ]]
 }
 
 @test "wnox hvt" {
-  skip_unless_host_is OpenBSD
+  skip_unless_host_is OpenBSD Darwin
 
   hvt_run test_wnox/test_wnox.hvt
   [ "$status" -eq 1 ] && [[ "$output" == *"host/guest translation fault"* ]]
