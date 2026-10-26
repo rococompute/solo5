@@ -538,6 +538,13 @@ xen_expect_abort() {
   expect_success
 }
 
+@test "sandbox hvt" {
+  skip_unless_host_is Darwin
+  setup_block
+  run ${TIMEOUT} --foreground 60s sandbox_macos/sandbox_macos ${BLOCK}
+  [ "$status" -eq 0 ] && [[ "$output" == *"SUCCESS"* ]]
+}
+
 @test "seccomp spt" {
   spt_run test_seccomp/test_seccomp.spt
   [ "$status" -eq 159 ] # SIGSYS

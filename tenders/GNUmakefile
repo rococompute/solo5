@@ -93,7 +93,8 @@ else ifeq ($(CONFIG_HOST), DragonFly)
     all_TARGETS += hvt/solo5-hvt
     HOSTLDLIBS += -lpthread -lnvmm
 else ifeq ($(CONFIG_HOST), Darwin)
-    hvt_SRCS += hvt/hvt_hvf.c hvt/hvt_hvf_$(CONFIG_HOST_ARCH).c
+    hvt_SRCS += hvt/hvt_hvf.c hvt/hvt_hvf_$(CONFIG_HOST_ARCH).c \
+        hvt/hvt_sandbox_macos.c
     all_TARGETS += hvt/solo5-hvt
     HOSTLDLIBS += -lpthread -framework Hypervisor
 endif

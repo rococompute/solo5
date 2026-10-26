@@ -44,11 +44,23 @@ netpeer/netpeer: netpeer/netpeer.c
 	@echo "HOSTCC $@"
 	$(CONFIG_HOST_CC) -O2 -Wall -o $@ $<
 
-clean: clean_netpeer
+ifeq ($(CONFIG_HOST), Darwin)
+# Exercises the macOS tender's privilege drop on its own.
+all: sandbox_macos/sandbox_macos
 
-.PHONY: clean_netpeer
-clean_netpeer:
-	$(RM) netpeer/netpeer
+sandbox_macos/sandbox_macos: sandbox_macos/sandbox_macos.c \
+    $(TOPDIR)/tenders/hvt/hvt_sandbox_macos.c \
+    $(TOPDIR)/tenders/hvt/hvt_sandbox_macos.h
+	@echo "HOSTCC $@"
+	$(CONFIG_HOST_CC) -O2 -Wall -o $@ sandbox_macos/sandbox_macos.c \
+	    $(TOPDIR)/tenders/hvt/hvt_sandbox_macos.c
+endif
+
+clean: clean_hosttools
+
+.PHONY: clean_hosttools
+clean_hosttools:
+	$(RM) netpeer/netpeer sandbox_macos/sandbox_macos
 
 .SUFFIXES:
 $(V).SILENT:

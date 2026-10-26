@@ -34,6 +34,7 @@
 
 #include "hvt.h"
 #include "hvt_hvf.h"
+#include "hvt_sandbox_macos.h"
 
 /* Stage 2 granule requested in hvt_init(); see there. */
 #define HVF_IPA_GRANULE_SIZE 0x1000UL
@@ -122,14 +123,11 @@ struct hvt *hvt_init(size_t mem_size)
 void hvt_drop_privileges()
 {
     /*
-     * TODO: macOS offers no equivalent of seccomp(2), pledge(2) or
-     * capsicum(4). The nearest fit is a sandbox(7) profile applied via the
-     * deprecated sandbox_init(3), which would have to be written so as not to
-     * cut off the Mach traps that hv_vcpu_run() depends on. Until that exists,
-     * be loud about it rather than silently pretending to sandbox anything.
+     * See hvt_sandbox_macos.c. Running unconfined is not an option for a
+     * tender built to drop privileges, so failure is fatal.
      */
-    warnx("WARNING: The HVF tender does not yet drop any privileges on macOS.");
-    warnx("WARNING: This is not recommended for production use.");
+    if (hvt_sandbox_macos_enter() == -1)
+        errx(1, "HVF: could not drop privileges");
 }
 #endif
 
