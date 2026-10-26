@@ -27,6 +27,7 @@
 #include <err.h>
 #include <fcntl.h>
 #include <libgen.h>
+#include <pthread.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -34,6 +35,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "hvt.h"
@@ -98,6 +100,178 @@ static void sig_handler(int signo)
     errx(1, "Exiting on signal %d", signo);
 }
 
+/*
+ * --exit-report=FD
+ *
+ * A supervisor running untrusted unikernels needs to tell the guest's own
+ * exit status apart from the tender killing a misbehaving guest, and both
+ * apart from the tender failing. Exit codes alone overlap (errx() exits 1,
+ * as does a guest calling solo5_exit(1)), so on exit write one JSON line to
+ * FD instead:
+ *
+ *   {"kind":"guest_exit","status":N}       guest called solo5_exit(N)
+ *   {"kind":"guest_abort","status":255}    guest called solo5_abort()
+ *   {"kind":"fault","reason":R,"message":M}
+ *       the tender stopped the guest: R is "translation_fault" (guest W^X
+ *       or bounds violation), "invalid_access" (bad hypercall or MMIO),
+ *       "exception" (unhandled guest exception) or "cpu_limit"
+ *   {"kind":"signal","message":M}          SIGINT or SIGTERM
+ *   {"kind":"tender_error","message":M}    anything else
+ *
+ * Messages come from err(3)/warn(3), which on hosts that support it are
+ * teed through report_err_write() so that the last one is known whichever
+ * errx() call site ended the tender.
+ */
+static int exit_report_fd = -1;
+static int exit_report_guest_status = -1;
+static char last_err[512];
+static size_t last_err_len;
+static char err_line[512];
+static size_t err_line_len;
+
+#if !defined(__GLIBC__)
+static int report_err_write(void *cookie, const char *buf, int len)
+{
+    (void)cookie;
+    (void)!write(STDERR_FILENO, buf, (size_t)len);
+    for (int i = 0; i < len; i++) {
+        if (buf[i] == '\n') {
+            memcpy(last_err, err_line, err_line_len);
+            last_err_len = err_line_len;
+            err_line_len = 0;
+        } else if (err_line_len < sizeof err_line) {
+            err_line[err_line_len++] = buf[i];
+        }
+    }
+    return len;
+}
+#endif
+
+static size_t json_escape(char *dst, size_t dstlen, const char *src,
+                          size_t srclen)
+{
+    size_t o = 0;
+    for (size_t i = 0; i < srclen && o + 7 < dstlen; i++) {
+        unsigned char c = (unsigned char)src[i];
+        if (c == '"' || c == '\\') {
+            dst[o++] = '\\';
+            dst[o++] = (char)c;
+        } else if (c < 0x20 || c >= 0x7f) {
+            o += (size_t)snprintf(dst + o, dstlen - o, "\\u%04x", c);
+        } else {
+            dst[o++] = (char)c;
+        }
+    }
+    dst[o] = 0;
+    return o;
+}
+
+static void exit_report(void)
+{
+    char line[1024], msg[600];
+    int n;
+
+    if (exit_report_fd == -1)
+        return;
+    if (exit_report_guest_status == 255) {
+        n = snprintf(line, sizeof line,
+                     "{\"kind\":\"guest_abort\",\"status\":255}\n");
+    } else if (exit_report_guest_status >= 0) {
+        n = snprintf(line, sizeof line,
+                     "{\"kind\":\"guest_exit\",\"status\":%d}\n",
+                     exit_report_guest_status);
+    } else {
+        json_escape(msg, sizeof msg, last_err, last_err_len);
+        const char *kind = "tender_error", *reason = NULL;
+        if (strstr(msg, "translation fault"))
+            kind = "fault", reason = "translation_fault";
+        else if (strstr(msg, "Invalid guest"))
+            kind = "fault", reason = "invalid_access";
+        else if (strstr(msg, "unhandled exception"))
+            kind = "fault", reason = "exception";
+        else if (strstr(msg, "CPU time limit"))
+            kind = "fault", reason = "cpu_limit";
+        else if (strstr(msg, "Exiting on signal"))
+            kind = "signal";
+        if (reason)
+            n = snprintf(line, sizeof line,
+                         "{\"kind\":\"%s\",\"reason\":\"%s\","
+                         "\"message\":\"%s\"}\n",
+                         kind, reason, msg);
+        else
+            n = snprintf(line, sizeof line,
+                         "{\"kind\":\"%s\",\"message\":\"%s\"}\n", kind,
+                         msg);
+    }
+    if (n > 0)
+        (void)!write(exit_report_fd, line,
+                     (size_t)n < sizeof line ? (size_t)n : sizeof line - 1);
+}
+
+static void handle_exit_report(char *cmdarg)
+{
+    int fd;
+    char extra;
+    if (sscanf(cmdarg, "--exit-report=%d%c", &fd, &extra) != 1 || fd < 0)
+        errx(1, "Malformed argument to --exit-report");
+    if (fcntl(fd, F_GETFD) == -1)
+        err(1, "--exit-report=%d", fd);
+    exit_report_fd = fd;
+#if !defined(__GLIBC__)
+    FILE *f = fwopen(NULL, report_err_write);
+    if (f == NULL)
+        err(1, "fwopen");
+    setvbuf(f, NULL, _IONBF, 0);
+    err_set_file(f);
+#endif
+    if (atexit(exit_report) != 0)
+        errx(1, "atexit failed");
+}
+
+/*
+ * --cpu-limit=SECONDS
+ *
+ * Bound the CPU time the tender (and so the guest) may use. A watchdog thread
+ * checks the process CPU time every 100ms and ends the tender once the limit
+ * is exceeded; this is reported as a fault with reason "cpu_limit".
+ *
+ * RLIMIT_CPU would be the obvious mechanism, but on macOS 26 with
+ * Hypervisor.framework a process with RLIMIT_CPU set livelocks inside
+ * hv_vcpu_run() and never runs the guest, whatever the limit.
+ */
+static long cpu_limit_secs;
+
+static void *cpu_limit_watchdog(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        struct timespec ts = {.tv_sec = 0, .tv_nsec = 100000000};
+        nanosleep(&ts, NULL);
+        if (clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &ts) == 0 &&
+            ts.tv_sec >= cpu_limit_secs)
+            errx(1, "CPU time limit of %ld seconds exceeded", cpu_limit_secs);
+    }
+    return NULL;
+}
+
+static void handle_cpu_limit(char *cmdarg)
+{
+    char extra;
+    if (sscanf(cmdarg, "--cpu-limit=%ld%c", &cpu_limit_secs, &extra) != 1 ||
+        cpu_limit_secs <= 0)
+        errx(1, "Malformed argument to --cpu-limit");
+}
+
+static void start_cpu_limit_watchdog(void)
+{
+    pthread_t t;
+    if (cpu_limit_secs == 0)
+        return;
+    if (pthread_create(&t, NULL, cpu_limit_watchdog, NULL) != 0)
+        errx(1, "Could not start the CPU limit watchdog");
+    pthread_detach(t);
+}
+
 static void handle_mem(char *cmdarg, size_t *mem_size)
 {
     size_t mem;
@@ -120,6 +294,8 @@ static void usage(const char *prog)
     fprintf(stderr, "Core options:\n");
     fprintf(stderr, "  [ --mem=512 ] (guest memory in MB)\n");
     fprintf(stderr, "  [ --no-net-ring ] (disable the net ring buffer)\n");
+    fprintf(stderr, "  [ --cpu-limit=SECONDS ] (limit CPU time used)\n");
+    fprintf(stderr, "  [ --exit-report=FD ] (write a JSON exit report to FD)\n");
     fprintf(stderr, "    --help (display this help)\n");
     fprintf(stderr, "    --version (display version information)\n");
     fprintf(stderr, "Compiled-in modules: ");
@@ -239,6 +415,18 @@ int main(int argc, char **argv)
             argv++;
             continue;
         }
+        if (strncmp("--exit-report=", *argv, 14) == 0) {
+            handle_exit_report(*argv);
+            argc--;
+            argv++;
+            continue;
+        }
+        if (strncmp("--cpu-limit=", *argv, 12) == 0) {
+            handle_cpu_limit(*argv);
+            argc--;
+            argv++;
+            continue;
+        }
         if (strncmp("--no-net-ring", *argv, sizeof("--no-net-ring")) == 0) {
             no_net_ring = 1;
             argc--;
@@ -282,6 +470,9 @@ int main(int argc, char **argv)
 
     hvt_boot_info_init(hvt, gpa_kend, argc, argv, mft, mft_size);
 
+    /* Threads must exist before privileges are dropped (see pledge(2)). */
+    start_cpu_limit_watchdog();
+
 #if defined(HVT_DROP_PRIVILEGES) && HVT_DROP_PRIVILEGES == 1
     hvt_drop_privileges();
 #else
@@ -290,5 +481,7 @@ int main(int argc, char **argv)
     warnx("WARNING: This is not recommended for production use.");
 #endif
 
-    return hvt_vcpu_loop(hvt);
+    int status = hvt_vcpu_loop(hvt);
+    exit_report_guest_status = status;
+    return status;
 }
