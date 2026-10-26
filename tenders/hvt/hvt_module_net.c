@@ -386,14 +386,25 @@ static void kill_net_pthread(struct hvt *hvt, int status, void *cookie)
 #endif
 }
 
+/*
+ * MTU requested with --net-mtu for each manifest entry (0 if none), and
+ * whether the entry was attached as a pre-opened fd (@NN). A tap interface
+ * reports its own MTU, but a pre-opened fd has nothing to ask, so its MTU can
+ * be set explicitly.
+ */
+static int requested_mtu[MFT_MAX_ENTRIES];
+static bool attached_fd[MFT_MAX_ENTRIES];
+
 static int handle_cmdarg(char *cmdarg, struct mft *mft)
 {
-    enum { opt_net, opt_net_mac } which;
+    enum { opt_net, opt_net_mac, opt_net_mtu } which;
 
     if (strncmp("--net:", cmdarg, 6) == 0)
         which = opt_net;
     else if (strncmp("--net-mac:", cmdarg, 10) == 0)
         which = opt_net_mac;
+    else if (strncmp("--net-mtu:", cmdarg, 10) == 0)
+        which = opt_net_mtu;
     else
         return -1;
 
@@ -407,8 +418,9 @@ static int handle_cmdarg(char *cmdarg, struct mft *mft)
                     name, iface);
         if (rc != 2)
             return -1;
+        unsigned index;
         struct mft_entry *e =
-            mft_get_by_name(mft, name, MFT_DEV_NET_BASIC, NULL);
+            mft_get_by_name(mft, name, MFT_DEV_NET_BASIC, &index);
         if (e == NULL) {
             warnx("Resource not declared in manifest: '%s'", name);
             return -1;
@@ -418,6 +430,15 @@ static int handle_cmdarg(char *cmdarg, struct mft *mft)
         if (fd < 0 || mtu < 0) {
             warnx("Could not attach interface: %s: %s", iface, strerror(errno));
             return -1;
+        }
+        attached_fd[index] = (iface[0] == '@');
+        if (requested_mtu[index] != 0) {
+            if (!attached_fd[index]) {
+                warnx("--net-mtu:%s only applies to a pre-opened fd (@NN)",
+                      name);
+                return -1;
+            }
+            mtu = requested_mtu[index];
         }
 
         /* e->u.net_basic.mac[] is set either by option or generated later by
@@ -445,6 +466,33 @@ static int handle_cmdarg(char *cmdarg, struct mft *mft)
             return -1;
         }
         memcpy(e->u.net_basic.mac, mac, sizeof mac);
+    } else if (which == opt_net_mtu) {
+        int mtu;
+        rc = sscanf(cmdarg,
+                    "--net-mtu:%" XSTR(MFT_NAME_MAX) "[A-Za-z0-9]=%d", name,
+                    &mtu);
+        if (rc != 2)
+            return -1;
+        if (mtu < 68 || mtu > 65535) {
+            warnx("--net-mtu:%s: MTU %d out of range (68..65535)", name, mtu);
+            return -1;
+        }
+        unsigned index;
+        struct mft_entry *e =
+            mft_get_by_name(mft, name, MFT_DEV_NET_BASIC, &index);
+        if (e == NULL) {
+            warnx("Resource not declared in manifest: '%s'", name);
+            return -1;
+        }
+        requested_mtu[index] = mtu;
+        if (e->attached) {
+            if (!attached_fd[index]) {
+                warnx("--net-mtu:%s only applies to a pre-opened fd (@NN)",
+                      name);
+                return -1;
+            }
+            e->u.net_basic.mtu = mtu;
+        }
     }
 
     return 0;
@@ -586,7 +634,9 @@ static const char *usage(void)
 {
     return "--net:NAME=IFACE | @NN (attach tap at IFACE or at fd @NN as "
            "network NAME)\n"
-           "  [ --net-mac:NAME=HWADDR ] (set HWADDR for network NAME)";
+           "  [ --net-mac:NAME=HWADDR ] (set HWADDR for network NAME)\n"
+           "  [ --net-mtu:NAME=MTU ] (set MTU for network NAME attached "
+           "at @NN)";
 }
 
 DECLARE_MODULE(net, .setup = setup, .handle_cmdarg = handle_cmdarg,
