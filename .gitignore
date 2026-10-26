@@ -28,3 +28,5 @@ toolchain/include/
 toolchain/lib/
 solo5-*.tar.gz
 /bindings/noexecstack.*
+/tenders/vmnet/solo5-vmnet
+/tenders/vmnet/solo5-vmnet.dSYM/

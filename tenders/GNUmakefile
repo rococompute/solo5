@@ -135,6 +135,18 @@ hvt/solo5-hvt-debug: $(hvt_debug_OBJS) $(common_LIB)
 	$(HOSTLINK)
 	$(CODESIGN_HVF)
 
+# solo5-vmnet gives solo5-hvt a network on macOS, through vmnet(3).
+ifeq ($(CONFIG_HOST), Darwin)
+all_TARGETS += vmnet/solo5-vmnet
+
+vmnet/solo5-vmnet: vmnet/solo5-vmnet.c
+	@echo "HOSTCC $@"
+	$(HOSTCC) $(HOSTCFLAGS) -o $@ $< -framework vmnet
+	@echo "CODESIGN $@"
+	codesign --force --sign - \
+	    --entitlements vmnet/solo5-vmnet.entitlements $@
+endif
+
 endif # CONFIG_HVT_TENDER
 
 ifdef CONFIG_SPT_TENDER
@@ -172,5 +184,6 @@ all_DEPS := $(patsubst %.o,%.d,$(all_OBJS))
 clean:
 	@echo "CLEAN tenders"
 	$(RM) $(all_TARGETS) $(all_OBJS) $(all_DEPS)
+	$(RM) -r vmnet/solo5-vmnet.dSYM
 
 include $(wildcard $(all_DEPS))

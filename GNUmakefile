@@ -192,6 +192,10 @@ ifeq ($(CONFIG_HOST), Darwin)
 	        --entitlements tenders/hvt/solo5-hvt.entitlements $(D)/bin/$$t \
 	        || exit 1; \
 	done
+	$(INSTALL) tenders/vmnet/solo5-vmnet $(D)/bin
+	codesign --force --sign - \
+	    --entitlements tenders/vmnet/solo5-vmnet.entitlements \
+	    $(D)/bin/solo5-vmnet
 endif
 endif
 ifdef CONFIG_SPT_TENDER
