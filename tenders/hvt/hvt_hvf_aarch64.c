@@ -33,6 +33,7 @@
 #include "hvt.h"
 #include "hvt_hvf.h"
 #include "hvt_cpu_aarch64.h"
+#include "hvt_hvf_aarch64_decode.h"
 
 /*
  * PSTATE bits. These come from the Linux uapi headers on the KVM backend;
@@ -119,26 +120,6 @@
 #define _SCTLR_C  _BITUL(2)
 #define _SCTLR_SA _BITUL(3)
 #define _SCTLR_I  _BITUL(12)
-
-/*
- * Exception class, ESR_EL2[31:26].
- */
-#define ESR_EC(esr)      (((esr) >> 26) & 0x3f)
-#define ESR_EC_WFX       0x01
-#define ESR_EC_HVC64     0x16
-#define ESR_EC_SMC64     0x17
-#define ESR_EC_SYSREG    0x18
-#define ESR_EC_IABT_LOW  0x20
-#define ESR_EC_DABT_LOW  0x24
-#define ESR_EC_BRK64     0x3c
-
-/*
- * Data abort ISS, ESR_EL2[24:0].
- */
-#define ESR_DABT_ISV(esr) (((esr) >> 24) & 0x1)
-#define ESR_DABT_SAS(esr) (((esr) >> 22) & 0x3)
-#define ESR_DABT_SRT(esr) (((esr) >> 16) & 0x1f)
-#define ESR_DABT_WNR(esr) (((esr) >> 6) & 0x1)
 
 /* A64 instructions are always 4 bytes wide. */
 #define AARCH64_INSN_SIZE 4
@@ -336,57 +317,62 @@ int hvt_vcpu_loop(struct hvt *hvt)
         }
 
         uint64_t esr = hvb->vcpu_exit->exception.syndrome;
+        uint64_t ipa = hvb->vcpu_exit->exception.physical_address;
+        uint64_t va = hvb->vcpu_exit->exception.virtual_address;
+        struct hvf_exit_decision d = hvf_decode_exit(
+            esr, ipa, AARCH64_MMIO_BASE, HVT_HYPERCALL_MMIO_BASE,
+            HVT_HYPERCALL_MAX, HVT_RING_KICK_MMIO_BASE);
 
-        switch (ESR_EC(esr)) {
-        case ESR_EC_DABT_LOW: {
+        switch (d.action) {
+        case HVF_EXIT_TRANSLATION_FAULT:
             /*
-             * Guest RAM is mapped at stage 2 for everything below
-             * AARCH64_MMIO_BASE, so a data abort below it is a genuine access
-             * violation -- a write to a page the ELF loader marked read-only,
-             * say -- and not a hypercall. Report it the way the other backends
-             * report the equivalent failure.
+             * Reported the way the other backends report the equivalent
+             * failure: a write to a page the ELF loader marked read-only,
+             * say, or a branch into a non-executable one.
              */
-            uint64_t gpa_mmio = hvb->vcpu_exit->exception.physical_address;
+            errx(1,
+                 "HVF: host/guest translation fault: pc=0x%" PRIx64
+                 ", va=0x%" PRIx64 ", pa=0x%" PRIx64,
+                 aarch64_get_reg(hvb->vcpu, HV_REG_PC), va, ipa);
 
-            if (gpa_mmio < AARCH64_MMIO_BASE)
-                errx(1,
-                     "HVF: host/guest translation fault: pc=0x%" PRIx64
-                     ", va=0x%" PRIx64 ", pa=0x%" PRIx64,
-                     aarch64_get_reg(hvb->vcpu, HV_REG_PC),
-                     hvb->vcpu_exit->exception.virtual_address, gpa_mmio);
+        case HVF_EXIT_INVALID_MMIO:
+            errx(1,
+                 "Invalid guest mmio access: mmio=0x%" PRIx64 ", esr=0x%" PRIx64
+                 ", pc=0x%" PRIx64,
+                 ipa, esr, aarch64_get_reg(hvb->vcpu, HV_REG_PC));
 
+        case HVF_EXIT_UNHANDLED:
+            errx(1,
+                 "HVF: unhandled exception: ec=0x%x, esr=0x%" PRIx64
+                 ", va=0x%" PRIx64 ", pa=0x%" PRIx64 ", pc=0x%" PRIx64,
+                 (unsigned)ESR_EC(esr), esr, va, ipa,
+                 aarch64_get_reg(hvb->vcpu, HV_REG_PC));
+
+        case HVF_EXIT_STEP:
+            aarch64_set_reg(hvb->vcpu, HV_REG_PC,
+                            aarch64_get_reg(hvb->vcpu, HV_REG_PC) +
+                                AARCH64_INSN_SIZE);
+            break;
+
+        case HVF_EXIT_RING_KICK:
+        case HVF_EXIT_HYPERCALL: {
             /*
-             * Above it, only the hypercall MMIO region is left unmapped, so
-             * this is a hypercall or a ring kick. Unlike KVM, HVF neither
-             * decodes the access for us nor steps over the faulting
-             * instruction.
+             * Unlike KVM, HVF neither decodes the access for us nor steps
+             * over the faulting store. SRT == 31 is the zero register.
              */
-            if (!ESR_DABT_ISV(esr) || !ESR_DABT_WNR(esr) ||
-                (1U << ESR_DABT_SAS(esr)) != 4)
-                errx(1, "Invalid guest mmio access: mmio=0x%" PRIx64
-                        ", esr=0x%" PRIx64,
-                     gpa_mmio, esr);
-
-            /*
-             * The value written is in the register named by ISS.SRT; SRT == 31
-             * means the zero register rather than x31.
-             */
-            uint32_t srt = ESR_DABT_SRT(esr);
             uint64_t data =
-                (srt == 31) ? 0 : aarch64_get_reg(hvb->vcpu, HV_REG_X0 + srt);
-
-            /* Step over the store before dispatching. */
+                (d.srt == 31) ? 0
+                              : aarch64_get_reg(hvb->vcpu, HV_REG_X0 + d.srt);
             aarch64_set_reg(hvb->vcpu, HV_REG_PC,
                             aarch64_get_reg(hvb->vcpu, HV_REG_PC) +
                                 AARCH64_INSN_SIZE);
 
-            /*
-             * A ring kick is a bare notification, not a hypercall, and its
-             * address sits above the hypercall range. HVF has no ioeventfd
-             * equivalent, so wake the I/O thread by hand as the BSD backends
-             * do.
-             */
-            if (gpa_mmio == HVT_RING_KICK_MMIO_BASE) {
+            if (d.action == HVF_EXIT_RING_KICK) {
+                /*
+                 * HVF has no ioeventfd equivalent, so wake the I/O thread by
+                 * hand as the BSD backends do. The pipe is non-blocking: a
+                 * full pipe already means a kick is pending.
+                 */
                 if (hvb->kick_net_pipe[1] != -1) {
                     uint8_t byte = 1;
                     (void)!write(hvb->kick_net_pipe[1], &byte, 1);
@@ -394,57 +380,20 @@ int hvt_vcpu_loop(struct hvt *hvt)
                 break;
             }
 
-            if (gpa_mmio < HVT_HYPERCALL_MMIO_BASE ||
-                gpa_mmio >= HVT_HYPERCALL_ADDRESS(HVT_HYPERCALL_MAX))
-                errx(1, "Invalid guest mmio access: mmio=0x%" PRIx64, gpa_mmio);
-
-            int nr = HVT_HYPERCALL_NR(gpa_mmio);
             hvt_gpa_t gpa = (uint32_t)data;
 
             /* Guest has halted the CPU. */
-            if (nr == HVT_HYPERCALL_HALT)
+            if (d.nr == HVT_HYPERCALL_HALT)
                 return hvt_core_hypercall_halt(hvt, gpa);
 
-            hvt_hypercall_fn_t fn = hvt_core_hypercalls[nr];
+            hvt_hypercall_fn_t fn = hvt_core_hypercalls[d.nr];
             if (fn == NULL)
-                errx(1, "Invalid guest hypercall: num=%d", nr);
+                errx(1, "Invalid guest hypercall: num=%u", d.nr);
 
             fn(hvt, gpa);
             break;
         }
-
-        case ESR_EC_IABT_LOW:
-            /*
-             * Only reachable when the guest branches into a page the ELF
-             * loader marked non-executable; stage 1 faults are the guest's own
-             * business and never exit to us.
-             */
-            errx(1,
-                 "HVF: host/guest translation fault: pc=0x%" PRIx64
-                 ", va=0x%" PRIx64 ", pa=0x%" PRIx64,
-                 aarch64_get_reg(hvb->vcpu, HV_REG_PC),
-                 hvb->vcpu_exit->exception.virtual_address,
-                 hvb->vcpu_exit->exception.physical_address);
-
-        case ESR_EC_WFX:
-            /*
-             * The guest has nothing to wake it but a hypercall return, so
-             * treat WFI/WFE as a no-op rather than letting it spin.
-             */
-            aarch64_set_reg(hvb->vcpu, HV_REG_PC,
-                            aarch64_get_reg(hvb->vcpu, HV_REG_PC) +
-                                AARCH64_INSN_SIZE);
-            break;
-
-        default:
-            errx(1,
-                 "HVF: unhandled exception: ec=0x%x, esr=0x%" PRIx64
-                 ", va=0x%" PRIx64 ", pa=0x%" PRIx64 ", pc=0x%" PRIx64,
-                 (unsigned)ESR_EC(esr), esr,
-                 hvb->vcpu_exit->exception.virtual_address,
-                 hvb->vcpu_exit->exception.physical_address,
-                 aarch64_get_reg(hvb->vcpu, HV_REG_PC));
-        } /* switch(ESR_EC(esr)) */
+        }
     }
 }
 

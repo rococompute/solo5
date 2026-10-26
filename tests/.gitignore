@@ -1,2 +1,5 @@
 netpeer/netpeer
 sandbox_macos/sandbox_macos
+fuzz_hvf_decode/check
+fuzz_hvf_decode/fuzz
+fuzz_hvf_decode/*.dSYM/

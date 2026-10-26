@@ -54,13 +54,33 @@ sandbox_macos/sandbox_macos: sandbox_macos/sandbox_macos.c \
 	@echo "HOSTCC $@"
 	$(CONFIG_HOST_CC) -O2 -Wall -o $@ sandbox_macos/sandbox_macos.c \
 	    $(TOPDIR)/tenders/hvt/hvt_sandbox_macos.c
+
+# Checks the HVF exit decoder (see fuzz_hvf_decode.c). The plain build is
+# part of the test suite; fuzz-hvf-decode builds a libFuzzer target with
+# Homebrew's clang.
+all: fuzz_hvf_decode/check
+
+fuzz_hvf_decode/check: fuzz_hvf_decode/fuzz_hvf_decode.c \
+    $(TOPDIR)/tenders/hvt/hvt_hvf_aarch64_decode.h
+	@echo "HOSTCC $@"
+	$(CONFIG_HOST_CC) -O2 -Wall -o $@ $<
+
+FUZZ_CC ?= /opt/homebrew/opt/llvm/bin/clang
+
+.PHONY: fuzz-hvf-decode
+fuzz-hvf-decode: fuzz_hvf_decode/fuzz_hvf_decode.c \
+    $(TOPDIR)/tenders/hvt/hvt_hvf_aarch64_decode.h
+	$(FUZZ_CC) -g -O1 -DFUZZ_LIBFUZZER \
+	    -fsanitize=fuzzer,address,undefined -o fuzz_hvf_decode/fuzz $<
 endif
 
 clean: clean_hosttools
 
 .PHONY: clean_hosttools
 clean_hosttools:
-	$(RM) netpeer/netpeer sandbox_macos/sandbox_macos
+	$(RM) netpeer/netpeer sandbox_macos/sandbox_macos \
+	    fuzz_hvf_decode/check fuzz_hvf_decode/fuzz
+	$(RM) -r fuzz_hvf_decode/*.dSYM
 
 .SUFFIXES:
 $(V).SILENT:

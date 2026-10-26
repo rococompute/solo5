@@ -657,6 +657,12 @@ hostile_run() {
   expect_success
 }
 
+@test "hvf exit decoder hvt" {
+  skip_unless_host_is Darwin
+  run ${TIMEOUT} --foreground 120s fuzz_hvf_decode/check
+  [ "$status" -eq 0 ] && [[ "$output" == *"SUCCESS"* ]]
+}
+
 @test "seccomp spt" {
   spt_run test_seccomp/test_seccomp.spt
   [ "$status" -eq 159 ] # SIGSYS
