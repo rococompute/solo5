@@ -545,6 +545,118 @@ xen_expect_abort() {
   [ "$status" -eq 0 ] && [[ "$output" == *"SUCCESS"* ]]
 }
 
+# A hostile guest must be stopped by the tender and the reason reported,
+# whatever it tries. See tests/test_hostile/test_hostile.c.
+hostile_run() {
+  REPORT=${BATS_TMPDIR}/exit-report.json
+  run ${TIMEOUT} --foreground 60s "${HVT_TENDER}" --mem=32 --cpu-limit=1 \
+    --exit-report=3 -- test_hostile/test_hostile.hvt "$1" 3>${REPORT}
+  REPORT_JSON=$(cat ${REPORT})
+  echo "exit report: ${REPORT_JSON}"
+}
+
+@test "hostile spin hvt" {
+  skip_unless_host_is Darwin
+  hostile_run spin
+  [[ "${REPORT_JSON}" == *'"kind":"fault"'* ]]
+  [[ "${REPORT_JSON}" == *'"reason":"cpu_limit"'* ]]
+  [ "$status" -eq 1 ]
+}
+
+@test "hostile wfi hvt" {
+  skip_unless_host_is Darwin
+  hostile_run wfi
+  [[ "${REPORT_JSON}" == *'"kind":"fault"'* ]]
+  [[ "${REPORT_JSON}" == *'"reason":"cpu_limit"'* ]]
+  [ "$status" -eq 1 ]
+}
+
+@test "hostile hvc hvt" {
+  skip_unless_host_is Darwin
+  hostile_run hvc
+  [[ "${REPORT_JSON}" == *'"kind":"fault"'* ]]
+  [[ "${REPORT_JSON}" == *'"reason":"exception"'* ]]
+  [ "$status" -eq 1 ]
+}
+
+@test "hostile smc hvt" {
+  skip_unless_host_is Darwin
+  hostile_run smc
+  [[ "${REPORT_JSON}" == *'"kind":"fault"'* ]]
+  [[ "${REPORT_JSON}" == *'"reason":"exception"'* ]]
+  [ "$status" -eq 1 ]
+}
+
+@test "hostile hypercall_reserved hvt" {
+  skip_unless_host_is Darwin
+  hostile_run hypercall_reserved
+  [[ "${REPORT_JSON}" == *'"kind":"fault"'* ]]
+  [[ "${REPORT_JSON}" == *'"reason":"invalid_access"'* ]]
+  [ "$status" -eq 1 ]
+}
+
+@test "hostile hypercall_unregistered hvt" {
+  skip_unless_host_is Darwin
+  hostile_run hypercall_unregistered
+  [[ "${REPORT_JSON}" == *'"kind":"fault"'* ]]
+  [[ "${REPORT_JSON}" == *'"reason":"invalid_access"'* ]]
+  [ "$status" -eq 1 ]
+}
+
+@test "hostile hypercall_bad_gpa hvt" {
+  skip_unless_host_is Darwin
+  hostile_run hypercall_bad_gpa
+  [[ "${REPORT_JSON}" == *'"kind":"fault"'* ]]
+  [[ "${REPORT_JSON}" == *'"reason":"invalid_access"'* ]]
+  [ "$status" -eq 1 ]
+}
+
+@test "hostile hypercall_wide_store hvt" {
+  skip_unless_host_is Darwin
+  hostile_run hypercall_wide_store
+  [[ "${REPORT_JSON}" == *'"kind":"fault"'* ]]
+  [[ "${REPORT_JSON}" == *'"reason":"invalid_access"'* ]]
+  [ "$status" -eq 1 ]
+}
+
+@test "hostile hypercall_load hvt" {
+  skip_unless_host_is Darwin
+  hostile_run hypercall_load
+  [[ "${REPORT_JSON}" == *'"kind":"fault"'* ]]
+  [[ "${REPORT_JSON}" == *'"reason":"invalid_access"'* ]]
+  [ "$status" -eq 1 ]
+}
+
+@test "hostile mmio_unassigned hvt" {
+  skip_unless_host_is Darwin
+  hostile_run mmio_unassigned
+  [[ "${REPORT_JSON}" == *'"kind":"fault"'* ]]
+  [[ "${REPORT_JSON}" == *'"reason":"invalid_access"'* ]]
+  [ "$status" -eq 1 ]
+}
+
+@test "hostile console_overflow hvt" {
+  skip_unless_host_is Darwin
+  hostile_run console_overflow
+  [[ "${REPORT_JSON}" == *'"kind":"fault"'* ]]
+  [[ "${REPORT_JSON}" == *'"reason":"invalid_access"'* ]]
+  [ "$status" -eq 1 ]
+}
+
+@test "hostile beyond_ram hvt" {
+  skip_unless_host_is Darwin
+  hostile_run beyond_ram
+  [[ "${REPORT_JSON}" == *'"kind":"guest_abort"'* ]]
+  [ "$status" -eq 255 ]
+}
+
+@test "hostile hypercall_wzr hvt" {
+  skip_unless_host_is Darwin
+  hostile_run hypercall_wzr
+  [[ "${REPORT_JSON}" == *'"kind":"guest_exit"'* ]]
+  expect_success
+}
+
 @test "seccomp spt" {
   spt_run test_seccomp/test_seccomp.spt
   [ "$status" -eq 159 ] # SIGSYS
