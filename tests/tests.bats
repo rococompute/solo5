@@ -764,7 +764,13 @@ xen_expect_abort() {
 }
 
 @test "buggyelf hvt" {
-  hvt_run test_buggyelf/buggyelf.hvt
+  # The fixture was fuzzed on x86_64. The aarch64 copy differs only in
+  # e_machine, so that the tender gets past the header check to the note.
+  case "${CONFIG_TARGET_ARCH}" in
+  x86_64)  hvt_run test_buggyelf/buggyelf.hvt ;;
+  aarch64) hvt_run test_buggyelf/buggyelf_aarch64.hvt ;;
+  *)       skip "no buggy ELF fixture for ${CONFIG_TARGET_ARCH}" ;;
+  esac
   [ "$status" -eq 1 ] && \
     [[ "$output" == *"note does not fall within valid size"* ]]
 }
