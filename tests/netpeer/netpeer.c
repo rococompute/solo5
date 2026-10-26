@@ -28,11 +28,14 @@
  * it is 10.i.0.1 and floods ICMP echo requests to 10.i.0.2 with a 32-bit
  * payload pattern, checking every reply, until the command exits.
  *
- * Usage: netpeer [-n NIF] [-c COUNT] [-p PATTERN] -- command [args...]
+ * Usage: netpeer [-n NIF] [-c COUNT] [-k] [-p PATTERN] -- command [args...]
  *
  *   -n NIF      number of interfaces (default 1, max 8)
  *   -c COUNT    stop after COUNT echo requests per interface (default:
  *               unlimited; 0 sends none and only keeps the fds open)
+ *   -k          once COUNT good replies have arrived on every interface,
+ *               stop the command with SIGTERM and exit 0 (for guests that
+ *               never exit by themselves, such as servers)
  *   -p PATTERN  32-bit payload pattern in hex (default deadbeef)
  *
  * Exits with the command's exit status, or 1 if any reply was corrupted.
@@ -42,6 +45,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <signal.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -150,6 +154,27 @@ static void send_arp_request(struct iface *ifc)
     send_frame(ifc, &f, sizeof f);
 }
 
+static void send_arp_reply(struct iface *ifc, const struct arp *req)
+{
+    struct __attribute__((packed)) {
+        struct ether e;
+        struct arp a;
+    } f;
+    memcpy(f.e.dst, req->sha, 6);
+    memcpy(f.e.src, ifc->mac, 6);
+    f.e.type = htons(0x0806);
+    f.a.htype = htons(1);
+    f.a.ptype = htons(0x0800);
+    f.a.hlen = 6;
+    f.a.plen = 4;
+    f.a.op = htons(2);
+    memcpy(f.a.sha, ifc->mac, 6);
+    memcpy(f.a.spa, ifc->ip, 4);
+    memcpy(f.a.tha, req->sha, 6);
+    memcpy(f.a.tpa, req->spa, 4);
+    send_frame(ifc, &f, sizeof f);
+}
+
 static void send_echo(struct iface *ifc)
 {
     struct __attribute__((packed)) {
@@ -192,11 +217,15 @@ static void handle_frame(struct iface *ifc, const uint8_t *buf, size_t len)
 
     if (ntohs(e->type) == 0x0806 && len >= sizeof *e + sizeof(struct arp)) {
         const struct arp *a = (const void *)(buf + sizeof *e);
-        /* Gratuitous ARP or an ARP reply from the guest. */
+        /* Any ARP packet from the guest tells us its MAC address. */
         if (memcmp(a->spa, ifc->guest_ip, 4) == 0) {
             memcpy(ifc->guest_mac, a->sha, 6);
             ifc->guest_mac_known = true;
         }
+        /* Answer ARP requests for our own address (e.g. a TCP/IP stack
+         * resolving its gateway before replying to us). */
+        if (ntohs(a->op) == 1 && memcmp(a->tpa, ifc->ip, 4) == 0)
+            send_arp_reply(ifc, a);
         return;
     }
 
@@ -224,7 +253,7 @@ static void handle_frame(struct iface *ifc, const uint8_t *buf, size_t len)
 
 static void usage(void)
 {
-    fprintf(stderr, "usage: netpeer [-n NIF] [-c COUNT] [-p PATTERN] -- "
+    fprintf(stderr, "usage: netpeer [-n NIF] [-c COUNT] [-k] [-p PATTERN] -- "
                     "command [args...]\n");
     exit(2);
 }
@@ -234,15 +263,19 @@ int main(int argc, char **argv)
     int nif = 1;
     long count = -1;
     uint32_t pat = 0xdeadbeef;
+    bool kill_when_done = false;
     int opt;
 
-    while ((opt = getopt(argc, argv, "n:c:p:")) != -1) {
+    while ((opt = getopt(argc, argv, "n:c:kp:")) != -1) {
         switch (opt) {
         case 'n':
             nif = atoi(optarg);
             break;
         case 'c':
             count = atol(optarg);
+            break;
+        case 'k':
+            kill_when_done = true;
             break;
         case 'p':
             pat = (uint32_t)strtoul(optarg, NULL, 16);
@@ -251,7 +284,8 @@ int main(int argc, char **argv)
             usage();
         }
     }
-    if (nif < 1 || nif > MAX_NIF || optind >= argc)
+    if (nif < 1 || nif > MAX_NIF || optind >= argc ||
+        (kill_when_done && count <= 0))
         usage();
     pattern[0] = pat >> 24;
     pattern[1] = pat >> 16;
@@ -311,12 +345,23 @@ int main(int argc, char **argv)
         close(child_fds[n]);
 
     int status = 0;
+    bool killed = false;
     double last_arp = 0;
     static uint8_t buf[FRAME_MAX];
     for (;;) {
         pid_t w = waitpid(pid, &status, WNOHANG);
         if (w == pid)
             break;
+
+        if (kill_when_done && !killed) {
+            bool done = true;
+            for (int n = 0; n < nif; n++)
+                done = done && (long)ifs[n].replies >= count;
+            if (done) {
+                kill(pid, SIGTERM);
+                killed = true;
+            }
+        }
 
         double t = now();
         for (int n = 0; n < nif; n++) {
@@ -356,7 +401,9 @@ int main(int argc, char **argv)
     }
 
     int rc;
-    if (WIFEXITED(status))
+    if (killed)
+        rc = 0;
+    else if (WIFEXITED(status))
         rc = WEXITSTATUS(status);
     else if (WIFSIGNALED(status))
         rc = 128 + WTERMSIG(status);
