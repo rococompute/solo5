@@ -25,6 +25,7 @@
 #include <assert.h>
 #include <err.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <inttypes.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -513,6 +514,19 @@ static int setup(struct hvt *hvt, struct mft *mft)
     defined(__DragonFly__) || defined(__APPLE__)
         if (pipe(hvb->kick_net_pipe) == -1) {
             warn("pipe() failed, falling back to hypercalls");
+            goto skip_ring;
+        }
+        /*
+         * The vCPU thread writes the kick. If the I/O thread falls behind and
+         * the pipe fills up, the write must not block the vCPU: a full pipe
+         * already means a kick is pending, so EAGAIN can be ignored.
+         */
+        if (fcntl(hvb->kick_net_pipe[1], F_SETFL, O_NONBLOCK) == -1) {
+            warn("fcntl(O_NONBLOCK) failed, falling back to hypercalls");
+            close(hvb->kick_net_pipe[0]);
+            close(hvb->kick_net_pipe[1]);
+            hvb->kick_net_pipe[0] = -1;
+            hvb->kick_net_pipe[1] = -1;
             goto skip_ring;
         }
         notify_fd = hvb->kick_net_pipe[0];
