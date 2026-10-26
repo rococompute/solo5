@@ -25,9 +25,10 @@ Solo5 itself has the following build dependencies:
 * full host system headers (on Linux, kernel headers are not always installed
   by default),
 * on Linux only, pkg-config and libseccomp >= 2.3.3 are required,
-* on macOS only, an ELF-capable linker and objcopy, e.g. `brew install lld
-  llvm`. Apple's own Clang can emit the ELF objects a unikernel is built from,
-  but `ld64` cannot link them.
+* on macOS only, an ELF-capable linker and objcopy: `brew install lld llvm`.
+  Apple's own Clang can emit the ELF objects a unikernel is built from, but
+  `ld64` cannot link them. `configure.sh` finds Homebrew's keg-only `lld` and
+  `llvm` by itself.
 
 To build Solo5, run:
 
@@ -79,17 +80,8 @@ Experimental:
 * _hvt_: DragonFly nvmm, using `solo5-hvt` as a _tender_, on the x86\_64
   architecture.  DragonFly 6.4 or later is recommended.
 * _hvt_: macOS Hypervisor.framework, using `solo5-hvt` as a _tender_, on the
-  aarch64 (Apple silicon) architecture. macOS 11 or later is required. The
-  tender is ad-hoc code signed at build time with the
-  `com.apple.security.hypervisor` entitlement, without which
-  `Hypervisor.framework` refuses to create a VM; re-signing or stripping the
-  binary drops that entitlement and must be followed by
-  `codesign --force --sign - --entitlements tenders/hvt/solo5-hvt.entitlements`.
-  Two caveats apply: the tender does not yet drop any privileges (macOS has no
-  equivalent of `seccomp`, `pledge(2)` or `capsicum(4)`), and `--net:` accepts
-  only the `@NN` pre-opened file descriptor form, since macOS has no TAP
-  device -- frames must be shuttled by a helper such as `vmnet-helper` or
-  `passt` over a socket passed to the tender.
+  aarch64 (Apple silicon) architecture. macOS 26 or later is required. See
+  "[_hvt_: Running on macOS](#hvt-running-on-macos)" below.
 * _spt_: Linux systems on the x86\_64, ppc64le, aarch64 and riscv64
   architectures, using `solo5-spt` as a _tender_. A Linux distribution with
   libseccomp >= 2.3.3 is required, or >= 2.5.0 on riscv64.
@@ -243,6 +235,73 @@ you can use `solo5-elftool`:
 ```sh
 ../../elftool/solo5-elftool query-manifest test_net.hvt
 ```
+
+## _hvt_: Running on macOS
+
+On Apple silicon Macs running macOS 26 or later, `solo5-hvt` uses
+Hypervisor.framework. It runs the same aarch64 `.hvt` binaries as Linux/KVM,
+including ones linked on Linux.
+
+**No root is needed.** Hypervisor.framework only requires the tender to be
+code signed with the `com.apple.security.hypervisor` entitlement. The build
+ad-hoc signs `solo5-hvt` with it, and `make install` signs the installed copy
+again. A binary that lost its signature (for example after `strip`) fails to
+create a VM with a message saying how to re-sign it:
+
+```sh
+codesign --force --sign - --entitlements tenders/hvt/solo5-hvt.entitlements solo5-hvt
+```
+
+**Isolation.** Guest memory is protected at stage 2 with a 4 KiB granule
+(available since macOS 26), so each ELF segment gets exactly its own
+permissions: code is execute-only, read-only data is read-only, and writable
+data is never executable. This is stricter than on Linux/KVM, where guest
+X/NX is not enforced. Before running the guest, the tender drops privileges
+with a deny-all `sandbox(7)` profile: it cannot open or create files, exec,
+fork, use the network or create new file descriptors; only the block and
+network devices it was given keep working.
+
+**Networking.** macOS has no tap device. Use `solo5-vmnet`, installed next to
+`solo5-hvt`, which attaches the unikernel to a vmnet(3) network (NAT to the
+outside world, with DHCP and DNS from macOS; no root needed) and runs the
+tender for you:
+
+```sh
+solo5-vmnet -- solo5-hvt --mem=128 -- unikernel.hvt
+```
+
+`solo5-vmnet` adds `--net:service=@3`, `--net-mac:service=...` and
+`--net-mtu:service=...` to the tender's command line; use `--net=NAME` if the
+unikernel's network device is not called `service`. Every frame the guest
+sends goes through `solo5-vmnet`, which can restrict where it may go:
+
+```sh
+# Only DHCP, DNS to the vmnet gateway, and HTTPS to 203.0.113.0/24.
+solo5-vmnet --allow=203.0.113.0/24:443 -- solo5-hvt -- unikernel.hvt
+```
+
+Other options: `--mode=host` (host-only network, no NAT), `--isolate` (no
+traffic with other vmnet guests) and `--verbose` (log dropped packets).
+Alternatively, pass any AF_UNIX datagram socket carrying one Ethernet frame
+per datagram with `--net:NAME=@FD`, and its MTU with `--net-mtu:NAME=MTU`.
+Raise `SO_SNDBUF` and `SO_RCVBUF` on both ends: on macOS the largest datagram
+is bounded by the send buffer, which is 2 KiB by default.
+
+**Limits and reporting.** `--cpu-limit=SECONDS` stops the guest after that
+much CPU time, and `--exit-report=FD` writes one JSON line to `FD` on exit
+saying whether the guest exited (and with which status), aborted, or was
+stopped by the tender, and why:
+
+```sh
+solo5-hvt --mem=64 --cpu-limit=30 --exit-report=3 -- unikernel.hvt 3>report.json
+```
+
+**Time.** The guest's cycle counter (`cntvct_el0`) runs at 24 MHz on Apple
+silicon, and is reported to the guest as such.
+
+The test suite runs unprivileged on macOS: the network tests use
+`tests/netpeer`, which plays the host's side of a socketpair instead of a tap
+interface, so `tests/setup-tests.sh` is not needed.
 
 ## _spt_: Running on Linux with a strict seccomp sandbox
 
