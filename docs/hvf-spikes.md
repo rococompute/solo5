@@ -80,7 +80,24 @@ a jumbo frame. Whoever creates the socketpair handed to the tender with
 test peer, `tests/netpeer`, uses 1 MiB). Set `--net-mtu:NAME=MTU` to
 match what the peer can carry.
 
-## 5. Other notes
+## 5. Startup and density
+
+Measured with Mirage unikernels built from mirage-skeleton (Apple M4 Pro):
+
+- `tutorial/noop`, start to exit, 50 sequential runs: median 13.5 ms, p95
+  14.2 ms. This covers creating the VM, loading the ELF, entering the
+  sandbox, booting the OCaml runtime and exiting.
+- 32 concurrent `device-usage/clock` unikernels (`--mem=32`, mostly asleep):
+  all running, about 13.6 MiB resident each (436 MiB total). Guest memory is
+  `MAP_ANON` and only touched pages are resident.
+- `device-usage/network` boots its TCP/IP stack and answers 10,000 pings over
+  a socketpair in under 50 ms in total.
+- `device-usage/http-fetch` (DHCP, DNS, TCP, TLS to the internet via vmnet)
+  takes about 3 s end to end, dominated by the network.
+
+No limit on the number of concurrent VMs was hit.
+
+## 6. Other notes
 
 - `hv_vcpu_create()` binds the vCPU to the calling thread, so the vCPU is
   created and run on the main thread, after the net I/O thread exists.
