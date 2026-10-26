@@ -183,6 +183,16 @@ ifdef CONFIG_HVT_TENDER
 	$(INSTALL) tenders/hvt/solo5-hvt $(D)/bin
 	- [ -f tenders/hvt/solo5-hvt-debug ] && \
 	    $(INSTALL) tenders/hvt/solo5-hvt-debug $(D)/bin
+ifeq ($(CONFIG_HOST), Darwin)
+	# Re-sign the installed copies so that the hypervisor entitlement
+	# survives anything that rewrote the binary on the way (e.g. strip).
+	for t in solo5-hvt solo5-hvt-debug; do \
+	    [ -f $(D)/bin/$$t ] || continue; \
+	    codesign --force --sign - \
+	        --entitlements tenders/hvt/solo5-hvt.entitlements $(D)/bin/$$t \
+	        || exit 1; \
+	done
+endif
 endif
 ifdef CONFIG_SPT_TENDER
 	$(INSTALL) tenders/spt/solo5-spt $(D)/bin

@@ -572,8 +572,37 @@ case ${CONFIG_HOST} in
         # Apple ships no ELF-capable linker or objcopy; LLVM's (e.g. from
         # Homebrew) are drop-in replacements. As on Linux, suppress the
         # .note.gnu.build-id that our linker scripts do not cater for.
-        TARGET_LD="${TARGET_LD:-ld.lld}"
-        TARGET_OBJCOPY="${TARGET_OBJCOPY:-llvm-objcopy}"
+        #
+        # Homebrew's lld and llvm are keg-only, so look in their prefixes as
+        # well as in PATH, and record absolute paths: the installed toolchain
+        # wrappers must keep finding the tools whatever PATH they run with.
+        #
+        darwin_find_tool()
+        {
+            if command -v "$1" >/dev/null 2>&1; then
+                command -v "$1"
+                return 0
+            fi
+            for _dir in /opt/homebrew/opt/lld/bin /opt/homebrew/opt/llvm/bin \
+                /usr/local/opt/lld/bin /usr/local/opt/llvm/bin \
+                /opt/local/libexec/llvm/bin; do
+                if [ -x "${_dir}/$1" ]; then
+                    echo "${_dir}/$1"
+                    return 0
+                fi
+            done
+            return 1
+        }
+        if [ -z "${TARGET_LD}" ]; then
+            TARGET_LD="$(darwin_find_tool ld.lld)" || \
+                die "ld.lld not found. An ELF-capable linker is required" \
+                    "on macOS: run 'brew install lld', or set TARGET_LD."
+        fi
+        if [ -z "${TARGET_OBJCOPY}" ]; then
+            TARGET_OBJCOPY="$(darwin_find_tool llvm-objcopy)" || \
+                die "llvm-objcopy not found. It is required on macOS:" \
+                    "run 'brew install llvm', or set TARGET_OBJCOPY."
+        fi
         TARGET_CC_LDFLAGS="-Wl,--build-id=none"
         if ! LD="${TARGET_LD}" ld_is_lld; then
             err "${TARGET_LD} is not LLVM LLD"
