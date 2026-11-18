@@ -139,7 +139,7 @@ hvt/solo5-hvt-debug: $(hvt_debug_OBJS) $(common_LIB)
 ifeq ($(CONFIG_HOST), Darwin)
 all_TARGETS += vmnet/solo5-vmnet
 
-vmnet/solo5-vmnet: vmnet/solo5-vmnet.c
+vmnet/solo5-vmnet: vmnet/solo5-vmnet.c vmnet/pool.h
 	@echo "HOSTCC $@"
 	$(HOSTCC) $(HOSTCFLAGS) -o $@ $< -framework vmnet
 	@echo "CODESIGN $@"

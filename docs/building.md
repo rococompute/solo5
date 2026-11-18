@@ -282,6 +282,47 @@ solo5-vmnet --allow=203.0.113.0/24:443 -- solo5-hvt -- unikernel.hvt
 
 Other options: `--mode=host` (host-only network, no NAT), `--isolate` (no
 traffic with other vmnet guests) and `--verbose` (log dropped packets).
+
+**Reusable network identities.** By default, `solo5-vmnet` keeps eight
+persistent interface UUID/MAC pairs per user and network mode (shared or
+host). They live in `~/Library/Caches/solo5-vmnet`, with private permissions.
+Each launch exclusively locks a free slot and asks vmnet to reuse its saved
+identity. Fresh applications still boot from scratch; no guest memory, keys,
+disks or application state is cached. Repeated development/CI boots therefore
+reuse a bounded set of DHCP identities instead of exhausting the host DHCP
+pool with a new MAC on every launch.
+
+If every slot is busy, the launcher waits for one; it does not grow the pool.
+Normal exit waits for vmnet interface teardown before releasing the slot.
+Locks are also released by the OS if the launcher crashes. A refused identity
+reuse, unexpected MAC change or corrupt state is an explicit error, never a
+silent fallback to fresh identities. Retaining a MAC does not guarantee the
+same IPv4 address: guests still obtain their address through DHCP. Existing
+leases from older launchers remain until they expire.
+
+Use `--pool-size=N` (1–32) to set the concurrency bound, and `--pool-dir=DIR`
+to override the state location. The corresponding environment defaults are
+`SOLO5_VMNET_POOL_SIZE` and `SOLO5_VMNET_POOL_DIR`. The directory's parent must
+exist; the directory is created with mode 0700 and must be owned by the current
+user. Keep one persistent directory shared across that user's test checkouts
+and use the same pool size across workers. Per-job temporary directories
+defeat cross-job identity reuse. Filesystem locks must work locally; this
+pool is intended for a single Mac, not a shared network filesystem. Removing
+pool state discards identities and can recreate DHCP churn, so do not clear it
+as routine build cleanup. `--verbose` reports the selected slot and whether
+its identity was reused.
+
+On macOS, validate allocation, backpressure, reuse, corruption handling and
+crash recovery with `python3 tests/vmnet_pool/test_pool.py` after `make`.
+The tests use real vmnet interfaces and disposable stand-in tenders; the
+launcher must retain its virtualization entitlement.
+For a DHCP-enabled Mirage image that logs `Lease obtained! IP: ADDRESS` and
+requires no boot arguments, run
+`python3 tests/vmnet_pool/test_dhcp.py --image /path/to/unikernel.hvt`.
+This boots the actual image twelve times, checks that one identity was used,
+and independently checks that macOS has one DHCP lease for its MAC. The test
+uses a disposable pool and requires read access to `/var/db/dhcpd_leases`.
+
 Alternatively, pass any AF_UNIX datagram socket carrying one Ethernet frame
 per datagram with `--net:NAME=@FD`, and its MTU with `--net-mtu:NAME=MTU`.
 Raise `SO_SNDBUF` and `SO_RCVBUF` on both ends: on macOS the largest datagram

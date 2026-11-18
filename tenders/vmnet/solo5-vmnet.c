@@ -46,11 +46,18 @@
  *                       DNS to the vmnet gateway. May be repeated. Without
  *                       any --allow, all egress is allowed.
  *   --verbose           log dropped packets to stderr
+ *   --pool-dir=DIR      persistent identity directory (default:
+ *                       ~/Library/Caches/solo5-vmnet)
+ *   --pool-size=N       concurrent slots per network mode (default: 8,
+ *                       maximum: 32). Wait when all slots are in use.
+ *                       SOLO5_VMNET_POOL_DIR and SOLO5_VMNET_POOL_SIZE
+ *                       provide defaults for these options.
  *
  * Exits with the tender's exit status.
  */
 
 #include <arpa/inet.h>
+#include <ctype.h>
 #include <dispatch/dispatch.h>
 #include <err.h>
 #include <errno.h>
@@ -66,6 +73,8 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <vmnet/vmnet.h>
+
+#include "pool.h"
 
 #define SOCKBUF_SIZE (1 << 20)
 #define MAX_RULES    64
@@ -85,12 +94,15 @@ static int sock = -1;
 static interface_ref iface;
 static size_t max_packet_size = 1514;
 static char mac[32];
+static struct identity_pool pool;
+static uuid_t identity;
 
 static void usage(void)
 {
     fprintf(stderr,
             "usage: solo5-vmnet [--net=NAME] [--mode=shared|host] [--isolate]\n"
             "                   [--allow=CIDR[:PORT]]... [--verbose]\n"
+            "                   [--pool-dir=DIR] [--pool-size=1..32]\n"
             "                   -- solo5-hvt [TENDER OPTIONS] [--] KERNEL "
             "[ARGS]\n");
     exit(2);
@@ -245,6 +257,9 @@ int main(int argc, char **argv)
     const char *net_name = "service";
     uint64_t mode = VMNET_SHARED_MODE;
     bool isolate = false;
+    const char *pool_dir = getenv("SOLO5_VMNET_POOL_DIR");
+    const char *pool_count = getenv("SOLO5_VMNET_POOL_SIZE");
+    unsigned slots = pool_count ? pool_size(pool_count) : POOL_SIZE;
     int i;
 
     for (i = 1; i < argc; i++) {
@@ -264,6 +279,10 @@ int main(int argc, char **argv)
             parse_rule(a + 8);
         } else if (strcmp(a, "--verbose") == 0) {
             verbose = true;
+        } else if (strncmp(a, "--pool-dir=", 11) == 0) {
+            pool_dir = a + 11;
+        } else if (strncmp(a, "--pool-size=", 12) == 0) {
+            slots = pool_size(a + 12);
         } else {
             usage();
         }
@@ -272,21 +291,33 @@ int main(int argc, char **argv)
         usage();
     char **cmd = &argv[i];
 
+    pool_acquire(&pool, pool_dir, slots,
+            mode == VMNET_SHARED_MODE ? "shared" : "host");
+
     /* Start the vmnet interface and wait for its parameters. */
     dispatch_queue_t q =
         dispatch_queue_create("solo5-vmnet", DISPATCH_QUEUE_SERIAL);
     dispatch_semaphore_t started = dispatch_semaphore_create(0);
     xpc_object_t desc = xpc_dictionary_create(NULL, NULL, 0);
     xpc_dictionary_set_uint64(desc, vmnet_operation_mode_key, mode);
+    if (pool.saved)
+        xpc_dictionary_set_uuid(desc, vmnet_interface_id_key, pool.id);
     if (isolate)
         xpc_dictionary_set_bool(desc, vmnet_enable_isolation_key, true);
 
     __block vmnet_return_t start_status = VMNET_FAILURE;
     __block uint64_t mtu = 1500;
+    __block bool has_identity = false;
     iface = vmnet_start_interface(
         desc, q, ^(vmnet_return_t status, xpc_object_t params) {
             start_status = status;
             if (status == VMNET_SUCCESS) {
+                const uint8_t *id = xpc_dictionary_get_uuid(params,
+                        vmnet_interface_id_key);
+                if (id) {
+                    uuid_copy(identity, id);
+                    has_identity = true;
+                }
                 const char *m =
                     xpc_dictionary_get_string(params, vmnet_mac_address_key);
                 if (m)
@@ -305,6 +336,9 @@ int main(int argc, char **argv)
     if (iface == NULL)
         errx(1, "vmnet_start_interface() failed");
     dispatch_semaphore_wait(started, DISPATCH_TIME_FOREVER);
+    if (start_status != VMNET_SUCCESS && pool.saved)
+        errx(1, "cannot reuse pooled identity %s: vmnet status %u; "
+                "no replacement allocated", pool.name, start_status);
     if (start_status != VMNET_SUCCESS)
         errx(1,
              "vmnet_start_interface() failed: status %u. solo5-vmnet must be "
@@ -313,6 +347,12 @@ int main(int argc, char **argv)
              start_status);
     if (mac[0] == 0)
         errx(1, "vmnet did not assign a MAC address");
+    if (!has_identity)
+        errx(1, "vmnet did not return an interface identity");
+    pool_save(&pool, identity, mac);
+    if (verbose)
+        fprintf(stderr, "solo5-vmnet: pool slot %d (%s identity)\n",
+                pool.slot, pool.saved ? "reused" : "new");
     if (max_packet_size == 0 || max_packet_size > 65536)
         max_packet_size = 1514;
 
@@ -358,12 +398,14 @@ int main(int argc, char **argv)
     if (pid == -1)
         err(1, "fork");
     if (pid == 0) {
+        close(pool.lock);
+        close(pool.dir);
+        close(sp[0]);
         if (sp[1] != CHILD_FD) {
             if (dup2(sp[1], CHILD_FD) == -1)
                 err(1, "dup2");
             close(sp[1]);
         }
-        close(sp[0]);
         execvp(nargv[0], nargv);
         err(127, "exec %s", nargv[0]);
     }
@@ -411,8 +453,15 @@ int main(int argc, char **argv)
             else if (WIFSIGNALED(status))
                 rc = 128 + WTERMSIG(status);
         }
-        /* vmnet releases the interface when this process exits. */
-        exit(rc);
+        /* Hold the slot until vmnet has finished releasing the interface. */
+        vmnet_return_t stopped = vmnet_stop_interface(iface, q,
+                ^(vmnet_return_t stop_status) {
+            if (stop_status != VMNET_SUCCESS)
+                errx(1, "vmnet interface shutdown failed: status %u", stop_status);
+            exit(rc);
+        });
+        if (stopped != VMNET_SUCCESS)
+            errx(1, "vmnet_stop_interface() failed: status %u", stopped);
     });
     dispatch_resume(ps);
 
