@@ -118,9 +118,9 @@ static void sig_handler(int signo)
  *   {"kind":"signal","message":M}          SIGINT or SIGTERM
  *   {"kind":"tender_error","message":M}    anything else
  *
- * Messages come from err(3)/warn(3), which on hosts that support it are
- * teed through report_err_write() so that the last one is known whichever
- * errx() call site ended the tender.
+ * Messages from err(3)/warn(3) are teed through report_err_write(), using
+ * the host libc's error stream, so the last one is known whichever errx()
+ * call site ended the tender.
  */
 static int exit_report_fd = -1;
 static int exit_report_guest_status = -1;
