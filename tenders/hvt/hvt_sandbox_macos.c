@@ -40,7 +40,11 @@
  *
  * socket(2) itself is not mediated by seatbelt. To keep the tender from
  * creating new descriptors of any kind, RLIMIT_NOFILE is also lowered to just
- * above the highest descriptor currently open.
+ * above the highest descriptor currently open, after filling every closed
+ * descriptor slot below it. Filling the gaps matters: RLIMIT_NOFILE bounds
+ * the descriptor *number*, not the number of open descriptors, so a slot
+ * freed by hvt_main (for example the ELF fd) would otherwise be reused by
+ * socket() or pipe() under the deny-all profile.
  */
 
 #include <err.h>
@@ -59,35 +63,19 @@
 const char hvt_sandbox_profile[] = "(version 1)\n"
                                    "(deny default)\n";
 
-static int highest_open_fd(void)
-{
-    struct rlimit rl;
-    if (getrlimit(RLIMIT_NOFILE, &rl) == -1)
-        return -1;
-    int max = (rl.rlim_cur == RLIM_INFINITY || rl.rlim_cur > 65536)
-                  ? 65536
-                  : (int)rl.rlim_cur;
-    int highest = -1;
-    for (int fd = 0; fd < max; fd++) {
-        if (fcntl(fd, F_GETFD) != -1)
-            highest = fd;
-    }
-    return highest;
-}
-
 int hvt_sandbox_macos_enter(void)
 {
     /*
      * Lower RLIMIT_NOFILE first: setrlimit() is itself not something the
      * profile needs to allow, but do it while nothing is restricted.
      */
-    int highest = highest_open_fd();
-    if (highest < 0) {
+    int limit = hvt_sandbox_fill_fd_gaps();
+    if (limit < 0) {
         warnx("sandbox: could not determine open file descriptors");
         return -1;
     }
-    struct rlimit rl = {.rlim_cur = (rlim_t)highest + 1,
-                        .rlim_max = (rlim_t)highest + 1};
+    struct rlimit rl = {.rlim_cur = (rlim_t)limit,
+                        .rlim_max = (rlim_t)limit};
     if (setrlimit(RLIMIT_NOFILE, &rl) == -1) {
         warn("sandbox: setrlimit(RLIMIT_NOFILE)");
         return -1;
