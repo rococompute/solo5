@@ -138,7 +138,9 @@ static void generate_mac_addr(uint8_t *addr)
 
     data = (muen_get_sched_start() << 32) | muen_get_sched_end();
     data ^= tscclock_epochoffset();
-    data = ((data << counter) | (data >> (dsize - counter))) + counter;
+    if (counter != 0)
+        data = (data << counter) | (data >> (dsize - counter));
+    data += counter;
     counter = (counter + 1) % dsize;
 
     for (i = 0; i < 6; i++) {

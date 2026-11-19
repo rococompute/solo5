@@ -92,7 +92,9 @@ int main(void)
     return 0;
 }
 C
-"${CC:-cc}" -std=gnu11 -fgnu89-inline -ffreestanding -O2 -Wall -Wextra -Werror \
+# CFLAGS may add sanitizers; it deliberately accepts multiple options.
+# shellcheck disable=SC2086
+"${CC:-cc}" -std=gnu11 -fgnu89-inline -ffreestanding -O2 -Wall -Wextra -Werror ${CFLAGS:-} \
     -I "$root/include" -I "$root/bindings" -I "$root/bindings/muen" \
     -iquote "$root/tenders/common" "$tmp/test.c" \
     "${MUEN_NET_SOURCE:-$root/bindings/muen/muen-net.c}" \
