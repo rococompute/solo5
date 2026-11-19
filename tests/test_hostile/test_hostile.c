@@ -72,7 +72,25 @@ static uint32_t load32(uint64_t addr)
     return v;
 }
 
-static bool run_case(const char *c)
+static uint32_t bss_code[4];
+static __thread uint32_t tls_code[4];
+
+static void execute_writable(void *buffer)
+{
+    /* AArch64 RET. This must fault at stage 2 before fetching any opcode. */
+    uint32_t instruction = 0xd65f03c0;
+    memcpy(buffer, &instruction, sizeof instruction);
+    __asm__ __volatile__("dc cvau, %0; dsb ish; ic ivau, %0; dsb ish; isb"
+                         : : "r"(buffer) : "memory");
+    ((void (*)(void))buffer)();
+}
+
+static __attribute__((noinline)) void execute_tls(void)
+{
+    execute_writable(tls_code);
+}
+
+static bool run_case(const char *c, const struct solo5_start_info *si)
 {
     if (!strcmp(c, "spin")) {
         /* Never yields to the tender. Stopped by --cpu-limit. */
@@ -82,6 +100,19 @@ static bool run_case(const char *c)
         /* Waits for an interrupt that cannot come. Stopped by --cpu-limit. */
         for (;;)
             __asm__ __volatile__("wfi" ::: "memory");
+    } else if (!strcmp(c, "exec_bss")) {
+        execute_writable(bss_code);
+    } else if (!strcmp(c, "exec_heap")) {
+        execute_writable((void *)si->heap_start);
+    } else if (!strcmp(c, "exec_stack")) {
+        uint32_t code[4];
+        execute_writable(code);
+    } else if (!strcmp(c, "exec_tls")) {
+        if (solo5_tls_size() > si->heap_size ||
+            solo5_tls_init(si->heap_start) != SOLO5_R_OK ||
+            solo5_set_tls_base(solo5_tls_tp_offset(si->heap_start)) != SOLO5_R_OK)
+            return false;
+        execute_tls();
     } else if (!strcmp(c, "hvc")) {
         __asm__ __volatile__("hvc #0" ::: "memory");
     } else if (!strcmp(c, "smc")) {
@@ -149,9 +180,10 @@ static bool run_case(const char *c)
 
 #else
 
-static bool run_case(const char *c)
+static bool run_case(const char *c, const struct solo5_start_info *si)
 {
     (void)c;
+    (void)si;
     puts("test_hostile is aarch64-only\n");
     return false;
 }
@@ -161,7 +193,7 @@ static bool run_case(const char *c)
 int solo5_app_main(const struct solo5_start_info *si)
 {
     puts("\n**** Solo5 standalone test_hostile ****\n\n");
-    if (run_case(si->cmdline)) {
+    if (run_case(si->cmdline, si)) {
         puts("SUCCESS\n");
         return SOLO5_EXIT_SUCCESS;
     }

@@ -107,8 +107,10 @@ struct hvt *hvt_init(size_t mem_size)
      * MMIO region at AARCH64_MMIO_BASE) is deliberately left unmapped so that
      * guest accesses to it trap out as stage 2 data aborts.
      */
+    /* Default every non-code page, including BSS/TLS/heap/stack, to NX.
+     * The ELF loader grants execution only to validated executable LOADs. */
     ret = hv_vm_map(hvt->mem, 0, mem_size,
-                    HV_MEMORY_READ | HV_MEMORY_WRITE | HV_MEMORY_EXEC);
+                    HV_MEMORY_READ | HV_MEMORY_WRITE);
     if (ret != HV_SUCCESS)
         errx(1, "HVF: hv_vm_map() failed: 0x%x", ret);
 
