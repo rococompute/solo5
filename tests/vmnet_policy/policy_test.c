@@ -415,7 +415,8 @@ static void test_gateway_dns(void)
     add_rule(&p, "198.51.100.0/24:80");
 
     size_t len = frame_udp(f, ip4(192, 168, 64, 10), gateway, 1234, 53);
-    check(policy_allows(&p, f, len, gateway), "DNS to gateway resolver allowed");
+    check(policy_allows(&p, f, len, gateway),
+          "DNS to gateway resolver allowed");
     len = frame_tcp(f, ip4(192, 168, 64, 10), gateway, 1234, 53);
     check(!policy_allows(&p, f, len, gateway),
           "TCP DNS to gateway not exempt");
