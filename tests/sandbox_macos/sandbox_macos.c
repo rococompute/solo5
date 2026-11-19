@@ -67,12 +67,19 @@ int main(int argc, char **argv)
     int blk = open(argv[1], O_RDWR);
     if (blk == -1)
         err(2, "open %s", argv[1]);
+    /* hvt_main closes the ELF file before dropping privileges. Preserve
+     * that real descriptor-gap shape instead of testing only a dense table. */
+    int gap = open(argv[1], O_RDONLY);
+    if (gap == -1)
+        err(2, "open gap fixture");
     int sp[2], kick[2];
     if (socketpair(AF_UNIX, SOCK_DGRAM, 0, sp) == -1 || pipe(kick) == -1)
         err(2, "socketpair/pipe");
     int kq = kqueue();
     if (kq == -1)
         err(2, "kqueue");
+
+    close(gap);
 
     if (hvt_sandbox_macos_enter() == -1)
         errx(1, "hvt_sandbox_macos_enter() failed");
@@ -81,6 +88,7 @@ int main(int argc, char **argv)
      * Must keep working. The random hypercall is served with arc4random_buf(),
      * and this is its first use in this process, as in the tender.
      */
+    expect("closed ELF-style descriptor gap is filled", fcntl(gap, F_GETFD) != -1);
     unsigned char r1[16] = {0}, r2[16] = {0}, zero[16] = {0};
     arc4random_buf(r1, sizeof r1);
     arc4random_buf(r2, sizeof r2);

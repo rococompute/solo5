@@ -1001,3 +1001,19 @@ hostile_run() {
   [ "$status" -eq 1 ] && \
     [[ "$output" == *"note does not fall within valid size"* ]]
 }
+
+# Portable regressions exercise the same headers as the native tender.
+@test "vmnet egress policy" {
+  run make -C vmnet_policy check
+  [ "$status" -eq 0 ] && [[ "$output" == *"PASS:"* ]]
+}
+
+@test "guest address bounds" {
+  run sh hvt_gpa_bounds.sh
+  [ "$status" -eq 0 ] && [[ "$output" == *"PASS:"* ]]
+}
+
+@test "sandbox descriptor gaps" {
+  run sh hvt_sandbox_rlimit.sh
+  [ "$status" -eq 0 ] && [[ "$output" == *"PASS:"* ]]
+}
