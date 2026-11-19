@@ -35,6 +35,9 @@ synchronize(const struct muchannel *const channel,
 {
     uint64_t epoch, epoch_after, proto, transport, size, elements, data_size;
 
+    if (reader->channel_size < sizeof(struct muchannel_header))
+        return MUCHANNEL_INCOMPATIBLE_INTERFACE;
+
     serialized_copy(&channel->hdr.epoch, &epoch);
     serialized_copy(&channel->hdr.protocol, &proto);
     serialized_copy(&channel->hdr.transport, &transport);
@@ -45,7 +48,7 @@ synchronize(const struct muchannel *const channel,
     if (epoch == MUCHANNEL_NULL_EPOCH || epoch != epoch_after)
         return MUCHANNEL_INCOMPATIBLE_INTERFACE;
 
-    /* Muen channels are at least 4 KB. */
+    /* Validate the mapped resource instead of assuming a minimum size. */
     data_size = reader->channel_size - sizeof(struct muchannel_header);
 
     if (reader->protocol != proto || SHMSTREAM20 != transport || size == 0 ||
@@ -77,6 +80,9 @@ muen_channel_read(const struct muchannel *const channel,
 {
     uint64_t epoch, pos, wc, wsc;
     enum muchannel_reader_result result;
+
+    if (reader->channel_size < sizeof(struct muchannel_header))
+        return MUCHANNEL_INCOMPATIBLE_INTERFACE;
 
     if (muen_channel_is_active(channel)) {
 
@@ -118,6 +124,8 @@ muen_channel_read(const struct muchannel *const channel,
 void muen_channel_drain(const struct muchannel *const channel,
                         struct muchannel_reader *reader)
 {
+    if (reader->channel_size < sizeof(struct muchannel_header))
+        return;
     serialized_copy(&channel->hdr.wc, &reader->rc);
 }
 
@@ -127,7 +135,8 @@ bool muen_channel_has_pending_data(const struct muchannel *const channel,
     enum muchannel_reader_result res;
     uint64_t wc;
 
-    if (!muen_channel_is_active(channel)) {
+    if (reader->channel_size < sizeof(struct muchannel_header) ||
+        !muen_channel_is_active(channel)) {
         return false;
     }
     if (MUCHANNEL_NULL_EPOCH == reader->epoch ||
