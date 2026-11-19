@@ -123,6 +123,12 @@ static void hypercall_net_write(struct hvt *hvt, hvt_gpa_t gpa)
 
     ret =
         write(e->b.hostfd, HVT_CHECKED_GPA_P(hvt, wr->data, wr->len), wr->len);
+    /* solo5_net_write drops packets on transient resource exhaustion. A
+     * nonblocking host interface's backpressure must not stop the tender. */
+    if (ret == -1 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == ENOBUFS)) {
+        wr->ret = SOLO5_R_OK;
+        return;
+    }
     if (ret == -1) {
         fprintf(stderr, "Fatal error when writing: %s\n", strerror(errno));
         exit(1);
@@ -247,6 +253,12 @@ static inline void process_ring_commits(struct hvt *hvt, struct hvt_ring *ring)
                     uint32_t ent_len = ent->len;
                     void *data = HVT_CHECKED_GPA_P(hvt, ent_data, ent_len);
                     ssize_t ret = write(e->b.hostfd, data, ent_len);
+                    if (ret == -1 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == ENOBUFS)) {
+                        /* The ring's fire-and-forget writes have the same
+                         * transient-drop contract as solo5_net_write. */
+                        processed++;
+                        continue;
+                    }
                     if (ret == -1)
                         err(1, "Fatal write error on net device");
                     if ((size_t)ret != ent_len)
@@ -413,7 +425,7 @@ static int handle_cmdarg(char *cmdarg, struct mft *mft)
     int rc;
     if (which == opt_net) {
         rc = sscanf(cmdarg,
-                    "--net:%" XSTR(MFT_NAME_MAX) "[A-Za-z0-9]="
+                    "--net:%" XSTR(MFT_NAME_MAX) "[-A-Za-z0-9_]="
                                                  "%19s",
                     name, iface);
         if (rc != 2)
@@ -451,7 +463,7 @@ static int handle_cmdarg(char *cmdarg, struct mft *mft)
     } else if (which == opt_net_mac) {
         uint8_t mac[6];
         rc = sscanf(cmdarg,
-                    "--net-mac:%" XSTR(MFT_NAME_MAX) "[A-Za-z0-9]="
+                    "--net-mac:%" XSTR(MFT_NAME_MAX) "[-A-Za-z0-9_]="
                                                      "%02" SCNx8 ":%02" SCNx8
                                                      ":%02" SCNx8 ":"
                                                      "%02" SCNx8 ":%02" SCNx8
@@ -469,7 +481,7 @@ static int handle_cmdarg(char *cmdarg, struct mft *mft)
     } else if (which == opt_net_mtu) {
         int mtu;
         rc = sscanf(cmdarg,
-                    "--net-mtu:%" XSTR(MFT_NAME_MAX) "[A-Za-z0-9]=%d", name,
+                    "--net-mtu:%" XSTR(MFT_NAME_MAX) "[-A-Za-z0-9_]=%d", name,
                     &mtu);
         if (rc != 2)
             return -1;

@@ -1022,3 +1022,13 @@ hostile_run() {
   run sh hvt_gdb_protocol.sh
   [ "$status" -eq 0 ] && [[ "$output" == *"PASS:"* ]]
 }
+
+@test "network manifest names" {
+  run sh hvt_net_names.sh
+  [ "$status" -eq 0 ] && [[ "$output" == *"PASS:"* ]]
+}
+
+@test "network backpressure" {
+  run sh hvt_net_backpressure.sh
+  [ "$status" -eq 0 ] && [[ "$output" == *"PASS:"* ]]
+}
