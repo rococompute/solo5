@@ -255,6 +255,19 @@ static void test_ipv4_framing(void)
     f[12] = 0x12;
     f[13] = 0x34;
     check(!policy_allows(&p, f, 60, 0), "unknown ethertype denied");
+    f[12] = 0x81;
+    f[13] = 0x00;
+    check(!policy_allows(&p, f, 60, 0), "VLAN-tagged frame denied");
+    f[12] = 0x00;
+    f[13] = 0x3c;
+    check(!policy_allows(&p, f, 60, 0), "802.3 length frame denied");
+
+    /* The smallest possible IPv4 frame has a header but no transport
+     * header; a destination rule still matches it. */
+    len = frame_ipv4(f, 17, ip4(10, 0, 0, 2), allowed, 0, 20, NULL, 0);
+    check(len == 34, "minimum IPv4 frame length");
+    check(policy_allows(&p, f, len, 0),
+          "minimum IPv4 frame allowed by destination rule");
 
     /* Version and IHL sanity. */
     len = frame_udp(f, ip4(10, 0, 0, 2), allowed, 1, 2);
@@ -432,6 +445,19 @@ static void test_multiple_rules(void)
     check(!policy_allows(&p, f, len, 0), "port must match its own CIDR");
     len = frame_tcp(f, ip4(10, 0, 0, 2), ip4(198, 51, 100, 7), 1, 443);
     check(!policy_allows(&p, f, len, 0), "port must not cross CIDRs");
+
+    /* 0.0.0.0/0 without a port is an explicit allow-all-IPv4 rule,
+     * including broadcasts, but it does not make IPv6 pass. */
+    struct egress_policy all = {0};
+    add_rule(&all, "0.0.0.0/0");
+    len = frame_udp(f, ip4(10, 0, 0, 2), UINT32_MAX, 138, 137);
+    check(policy_allows(&all, f, len, 0),
+          "allow-all rule permits limited broadcast");
+    len = frame_udp(f, ip4(10, 0, 0, 2), ip4(8, 8, 8, 8), 1, 2);
+    f[12] = 0x86;
+    f[13] = 0xdd;
+    check(!policy_allows(&all, f, len, 0),
+          "allow-all IPv4 rule still denies IPv6");
 }
 
 int main(void)
