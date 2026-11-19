@@ -118,14 +118,21 @@ static char *mem2hex(const unsigned char *mem, char *buf, size_t count)
 
 /*
  * Converts the hex string in buf into binary in mem.
- * Returns a pointer to the character AFTER the last byte written.
+ * Returns a pointer to the character AFTER the last byte written, or NULL
+ * without writing anything if the payload is not exactly count hex bytes.
  */
 static unsigned char *hex2mem(const char *buf, unsigned char *mem, size_t count)
 {
     size_t i;
     unsigned char ch;
 
-    assert(strlen(buf) >= (2 * count));
+    /* Validate the complete payload before changing guest memory/registers.
+     * Both M and G packets come from the debugger, including their lengths. */
+    if (count > SIZE_MAX / 2 || strlen(buf) != 2 * count)
+        return NULL;
+    for (i = 0; i < 2 * count; i++)
+        if (hex((unsigned char)buf[i]) < 0)
+            return NULL;
 
     for (i = 0; i < count; i++) {
         ch = hex(*buf++) << 4;
@@ -402,7 +409,7 @@ static void gdb_handle_exception(struct hvt *hvt, int sigval)
 
     for (;;) {
         hvt_gpa_t addr = 0, result;
-        gdb_breakpoint_type type;
+        uint32_t type;
         size_t len;
         int command, ret;
 
@@ -462,7 +469,8 @@ static void gdb_handle_exception(struct hvt *hvt, int sigval)
 
             if ((addr > hvt->guest_mem_size) ||
                 add_overflow(addr, len, result) ||
-                (result > hvt->guest_mem_size) || (len > BUFMAX / 2)) {
+                (result > hvt->guest_mem_size) ||
+                (len > (sizeof(obuf) - 1) / 2)) {
                 /* Don't panic about this, just return error so the debugger
                  * tries again. */
                 send_error_msg();
@@ -488,8 +496,10 @@ static void gdb_handle_exception(struct hvt *hvt, int sigval)
                  * tries again. */
                 send_error_msg();
             } else {
-                hex2mem(obuf, hvt->mem + addr, len);
-                send_okay_msg();
+                if (hex2mem(obuf, hvt->mem + addr, len) == NULL)
+                    send_error_msg();
+                else
+                    send_okay_msg();
             }
             break; /* Wait for another command. */
         }
@@ -497,7 +507,8 @@ static void gdb_handle_exception(struct hvt *hvt, int sigval)
         case 'g': {
             /* Read general registers */
             len = BUFMAX;
-            if (hvt_gdb_read_registers(hvt, registers, &len) == -1) {
+            if (hvt_gdb_read_registers(hvt, registers, &len) == -1 ||
+                len > (sizeof(obuf) - 1) / 2) {
                 send_error_msg();
             } else {
                 mem2hex(registers, obuf, len);
@@ -510,12 +521,16 @@ static void gdb_handle_exception(struct hvt *hvt, int sigval)
             /* Write general registers */
             len = BUFMAX;
             /* Call read_registers just to get len (not very efficient). */
-            if (hvt_gdb_read_registers(hvt, registers, &len) == -1) {
+            if (hvt_gdb_read_registers(hvt, registers, &len) == -1 ||
+                len > sizeof(registers)) {
                 send_error_msg();
                 break;
             }
             /* Packet looks like 'Gxxxxx', so we have to skip the first char */
-            hex2mem(packet + 1, registers, len);
+            if (hex2mem(packet + 1, registers, len) == NULL) {
+                send_error_msg();
+                break;
+            }
             if (hvt_gdb_write_registers(hvt, registers, len) == -1) {
                 send_error_msg();
                 break;
@@ -541,7 +556,8 @@ static void gdb_handle_exception(struct hvt *hvt, int sigval)
                 break;
             }
 
-            if ((addr > hvt->guest_mem_size) ||
+            if (type >= GDB_BREAKPOINT_MAX ||
+                (addr > hvt->guest_mem_size) ||
                 add_overflow(addr, len, result) ||
                 (result > hvt->guest_mem_size)) {
                 /* Don't panic about this, just return error so the debugger
