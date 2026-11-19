@@ -129,12 +129,10 @@ static size_t last_err_len;
 static char err_line[512];
 static size_t err_line_len;
 
-#if !defined(__GLIBC__)
-static int report_err_write(void *cookie, const char *buf, int len)
+static void report_err_bytes(const char *buf, size_t len)
 {
-    (void)cookie;
     (void)!write(STDERR_FILENO, buf, (size_t)len);
-    for (int i = 0; i < len; i++) {
+    for (size_t i = 0; i < len; i++) {
         if (buf[i] == '\n') {
             memcpy(last_err, err_line, err_line_len);
             last_err_len = err_line_len;
@@ -143,9 +141,18 @@ static int report_err_write(void *cookie, const char *buf, int len)
             err_line[err_line_len++] = buf[i];
         }
     }
+}
+
+#if defined(__GLIBC__)
+static ssize_t report_err_write(void *cookie, const char *buf, size_t len)
+#else
+static int report_err_write(void *cookie, const char *buf, int len)
+#endif
+{
+    (void)cookie;
+    report_err_bytes(buf, (size_t)len);
     return len;
 }
-#endif
 
 static size_t json_escape(char *dst, size_t dstlen, const char *src,
                           size_t srclen)
@@ -217,11 +224,20 @@ static void handle_exit_report(char *cmdarg)
     if (fcntl(fd, F_GETFD) == -1)
         err(1, "--exit-report=%d", fd);
     exit_report_fd = fd;
-#if !defined(__GLIBC__)
+#if defined(__GLIBC__)
+    cookie_io_functions_t io = {.write = report_err_write};
+    FILE *f = fopencookie(NULL, "w", io);
+#else
     FILE *f = fwopen(NULL, report_err_write);
+#endif
     if (f == NULL)
-        err(1, "fwopen");
+        err(1, "could not open exit-report error stream");
     setvbuf(f, NULL, _IONBF, 0);
+#if defined(__GLIBC__)
+    /* glibc's err()/warn() use stderr; it has no BSD err_set_file().
+     * Keep the original descriptor as the tee destination, not this FILE. */
+    stderr = f;
+#else
     err_set_file(f);
 #endif
     if (atexit(exit_report) != 0)
