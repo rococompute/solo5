@@ -1017,3 +1017,8 @@ hostile_run() {
   run sh hvt_sandbox_rlimit.sh
   [ "$status" -eq 0 ] && [[ "$output" == *"PASS:"* ]]
 }
+
+@test "debugger packet bounds" {
+  run sh hvt_gdb_protocol.sh
+  [ "$status" -eq 0 ] && [[ "$output" == *"PASS:"* ]]
+}
