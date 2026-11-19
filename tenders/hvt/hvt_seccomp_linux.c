@@ -68,7 +68,9 @@ void hvt_seccomp_apply(void)
         SCMP_SYS(pwrite64), /* block write */
         SCMP_SYS(epoll_pwait), /* poll hypercall */
         SCMP_SYS(timerfd_settime), /* timeout for the poll */
-        SCMP_SYS(clock_gettime), /* walltime hypercall */
+        SCMP_SYS(clock_gettime), /* walltime and CPU watchdog */
+        SCMP_SYS(nanosleep), /* CPU watchdog; libc may use either syscall */
+        SCMP_SYS(clock_nanosleep),
         SCMP_SYS(getrandom), /* random hypercall */
         SCMP_SYS(exit_group), /* guest exit */
         SCMP_SYS(rt_sigreturn), /* signal handler returning */
