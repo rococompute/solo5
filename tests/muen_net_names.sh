@@ -95,7 +95,7 @@ C
 # CFLAGS may add sanitizers; it deliberately accepts multiple options.
 # shellcheck disable=SC2086
 "${CC:-cc}" -std=gnu11 -fgnu89-inline -ffreestanding -O2 -Wall -Wextra -Werror ${CFLAGS:-} \
-    -I "$root/include" -I "$root/bindings" -I "$root/bindings/muen" \
+    -I "$root/include" -I "$root/bindings/muen" -I "$root/bindings" \
     -iquote "$root/tenders/common" "$tmp/test.c" \
     "${MUEN_NET_SOURCE:-$root/bindings/muen/muen-net.c}" \
     "$root/tenders/common/mft.c" "$root/bindings/muen/reader.c" \
