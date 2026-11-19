@@ -15,7 +15,7 @@ cat > "$tmp/test.c" <<'C'
 #include <sys/syscall.h>
 #include <time.h>
 #include <unistd.h>
-static atomic_int ready, start;
+static atomic_int ready, start, finished;
 void hvt_seccomp_apply(void);
 static void *worker(void *unused)
 {
@@ -27,6 +27,7 @@ static void *worker(void *unused)
     assert(syscall(SYS_clock_nanosleep, CLOCK_MONOTONIC, 0, &delay, NULL) == 0);
     assert(nanosleep(&delay, NULL) == 0);
     assert(clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &delay) == 0);
+    atomic_store_explicit(&finished, 1, memory_order_release);
     return NULL;
 }
 int main(void)
@@ -37,6 +38,9 @@ int main(void)
     hvt_seccomp_apply();
     atomic_store_explicit(&start, 1, memory_order_release);
     assert(pthread_join(thread, NULL) == 0);
+    /* KILL_THREAD can let join succeed even though the worker never finished. */
+    if (!atomic_load_explicit(&finished, memory_order_acquire))
+        _exit(42);
     const char message[] = "PASS: production TSYNC policy permits watchdog sleep and thread teardown\n";
     assert(write(STDOUT_FILENO, message, sizeof message - 1) == sizeof message - 1);
     return 0;
