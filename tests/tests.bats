@@ -608,6 +608,38 @@ hostile_run() {
   [ "$status" -eq 1 ]
 }
 
+@test "hostile exec_bss hvt" {
+  skip_unless_host_is Darwin
+  hostile_run exec_bss
+  [[ "${REPORT_JSON}" == *'"kind":"fault"'* ]]
+  [[ "${REPORT_JSON}" == *'"reason":"translation_fault"'* ]]
+  [ "$status" -eq 1 ]
+}
+
+@test "hostile exec_heap hvt" {
+  skip_unless_host_is Darwin
+  hostile_run exec_heap
+  [[ "${REPORT_JSON}" == *'"kind":"fault"'* ]]
+  [[ "${REPORT_JSON}" == *'"reason":"translation_fault"'* ]]
+  [ "$status" -eq 1 ]
+}
+
+@test "hostile exec_stack hvt" {
+  skip_unless_host_is Darwin
+  hostile_run exec_stack
+  [[ "${REPORT_JSON}" == *'"kind":"fault"'* ]]
+  [[ "${REPORT_JSON}" == *'"reason":"translation_fault"'* ]]
+  [ "$status" -eq 1 ]
+}
+
+@test "hostile exec_tls hvt" {
+  skip_unless_host_is Darwin
+  hostile_run exec_tls
+  [[ "${REPORT_JSON}" == *'"kind":"fault"'* ]]
+  [[ "${REPORT_JSON}" == *'"reason":"translation_fault"'* ]]
+  [ "$status" -eq 1 ]
+}
+
 @test "hostile hypercall_reserved hvt" {
   skip_unless_host_is Darwin
   hostile_run hypercall_reserved
@@ -1030,5 +1062,37 @@ hostile_run() {
 
 @test "network backpressure" {
   run sh hvt_net_backpressure.sh
+  [ "$status" -eq 0 ] && [[ "$output" == *"PASS:"* ]]
+}
+
+@test "pure BSS ELF segment bounds" {
+  run sh elf_bss_bounds.sh
+  [ "$status" -eq 0 ] && [[ "$output" == *"PASS:"* ]]
+}
+
+@test "Muen resource reader bounds" {
+  run sh muen_reader_bounds.sh
+  [ "$status" -eq 0 ] && [[ "$output" == *"PASS:"* ]]
+}
+
+@test "network ring bounds" {
+  run sh hvt_ring_bounds.sh
+  [ "$status" -eq 0 ] && [[ "$output" == *"PASS:"* ]]
+}
+
+@test "structured exit report classifications" {
+  run sh hvt_exit_report.sh
+  [ "$status" -eq 0 ] && [[ "$output" == *"PASS:"* ]]
+}
+
+@test "Linux watchdog seccomp syscalls" {
+  skip_unless_host_is Linux
+  run sh hvt_seccomp_watchdog.sh
+  [ "$status" -eq 0 ] && [[ "$output" == *"PASS:"* ]]
+}
+
+@test "Linux sandboxed exit report classifications" {
+  skip_unless_host_is Linux
+  run env HVT_REPORT_SECCOMP=1 sh hvt_exit_report.sh
   [ "$status" -eq 0 ] && [[ "$output" == *"PASS:"* ]]
 }

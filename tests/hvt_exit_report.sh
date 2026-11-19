@@ -24,17 +24,29 @@ cat > "$tmp/test.c" <<'C'
 #include <sys/types.h>
 #include <unistd.h>
 #include "report.c"
+#ifdef HVT_REPORT_SECCOMP
+void hvt_seccomp_apply(void);
+#endif
 int main(int argc, char **argv)
 {
     assert(argc == 3);
     char option[64];
     snprintf(option, sizeof option, "--exit-report=%d", atoi(argv[1]));
     handle_exit_report(option);
+#ifdef HVT_REPORT_SECCOMP
+    hvt_seccomp_apply();
+#endif
     if (!strcmp(argv[2], "fault"))
         errx(1, "host/guest translation fault");
     if (!strcmp(argv[2], "signal")) {
+#ifdef HVT_REPORT_SECCOMP
+        /* The real signal is delivered externally, not by a filtered
+         * getpid/tgkill pair. Exercise its actual handler directly here. */
+        sig_handler(SIGTERM);
+#else
         assert(signal(SIGTERM, sig_handler) != SIG_ERR);
         raise(SIGTERM);
+#endif
     }
     if (!strcmp(argv[2], "cpu"))
         errx(1, "CPU time limit of 1 seconds exceeded");
@@ -45,8 +57,16 @@ int main(int argc, char **argv)
     errx(1, "ordinary tender error");
 }
 C
-"${CC:-cc}" -std=gnu11 -O2 -Wall -Wextra -Werror -Wno-unused-variable \
-    "$tmp/test.c" -o "$tmp/check"
+if [ "${HVT_REPORT_SECCOMP:-0}" = 1 ]; then
+    "${CC:-cc}" -std=gnu11 -O2 -Wall -Wextra -Werror -Wno-unused-variable \
+        -DHVT_REPORT_SECCOMP -I "$root/include" \
+        -iquote "$root/tenders/common" -iquote "$root/tenders/hvt" \
+        "$tmp/test.c" "$root/tenders/hvt/hvt_seccomp_linux.c" \
+        -lseccomp -o "$tmp/check"
+else
+    "${CC:-cc}" -std=gnu11 -O2 -Wall -Wextra -Werror -Wno-unused-variable \
+        "$tmp/test.c" -o "$tmp/check"
+fi
 python3 - "$tmp/check" <<'PY'
 import json,subprocess,sys,tempfile
 for mode,kind,reason in [('fault','fault','translation_fault'),('signal','signal',None),('cpu','fault','cpu_limit'),('guest','guest_exit',None),('error','tender_error',None)]:
