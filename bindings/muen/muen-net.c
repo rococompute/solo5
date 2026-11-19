@@ -155,11 +155,18 @@ static bool muen_net_dev_init(const char *name, struct muen_net_device *device,
                               struct solo5_net_info *info)
 {
     assert(!device->acquired);
-    const uint64_t epoch = muen_get_sched_start();
     char mac_str[18];
-    char buffer[64];
+    char buffer[MAX_NAME_LENGTH + 1];
+    /* The longer |out suffix bounds both channel names. MFT names can be
+     * longer than Muen resource names; refuse instead of aborting or looking
+     * up a truncated alias. The caller returns SOLO5_R_EINVAL. */
     const int retval = snprintf(buffer, sizeof buffer, "%s|out", name);
-    assert(retval > 0 && (unsigned)retval < sizeof buffer);
+    if (retval <= 0 || (unsigned)retval >= sizeof buffer) {
+        log(WARN, "Solo5: Net: '%s': Muen device name exceeds %u characters\n",
+            name, (unsigned)(MAX_NAME_LENGTH - (sizeof("|out") - 1)));
+        return false;
+    }
+    const uint64_t epoch = muen_get_sched_start();
     const struct muen_resource_type *const chan_out =
         muen_get_resource(buffer, MUEN_RES_MEMORY);
     snprintf(buffer, sizeof buffer, "%s|in", name);

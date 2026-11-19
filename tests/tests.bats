@@ -1096,3 +1096,8 @@ hostile_run() {
   run env HVT_REPORT_SECCOMP=1 sh hvt_exit_report.sh
   [ "$status" -eq 0 ] && [[ "$output" == *"PASS:"* ]]
 }
+
+@test "Muen network resource name bounds" {
+  run sh muen_net_names.sh
+  [ "$status" -eq 0 ] && [[ "$output" == *"PASS:"* ]]
+}
