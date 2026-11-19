@@ -179,10 +179,19 @@ struct io_thread_arg {
 /* Process a NET_READ submission entry. Reads directly from the TAP fd into
  * guest memory and posts a commit.
  */
-static inline void process_read_entry(struct hvt *hvt, struct hvt_ring *ring,
-                                      struct hvt_ring_entry *ent)
+static inline bool process_read_entry(struct hvt *hvt, struct hvt_ring *ring,
+                                      struct hvt_ring_entry *ent, uint32_t head)
 {
-    uint32_t commit_idx = ring->com_tail & HVT_RING_MASK;
+    hvt_rmb();
+    uint32_t com_tail = ring->com_tail;
+    uint32_t occupied = com_tail - ring->com_head;
+    if (occupied > HVT_RING_SIZE)
+        errx(1, "Invalid guest network completion ring indices");
+    /* Backpressure is not an invalid request: leave both the submission and
+     * its network input untouched until the guest drains a completion. */
+    if (occupied == HVT_RING_SIZE)
+        return false;
+    uint32_t commit_idx = com_tail & HVT_RING_MASK;
     struct hvt_ring_commit *commit = &ring->commits[commit_idx];
 
     commit->id = ent->id;
@@ -212,8 +221,9 @@ static inline void process_read_entry(struct hvt *hvt, struct hvt_ring *ring,
     }
 
     hvt_wmb();
-    ring->com_tail++;
-    ring->ent_head++;
+    ring->com_tail = com_tail + 1;
+    ring->ent_head = head + 1;
+    return true;
 }
 
 /*
@@ -234,13 +244,20 @@ static inline void process_ring_commits(struct hvt *hvt, struct hvt_ring *ring)
      * On x86 (TSO) this is harmless, loads are never reordered with loads.
      */
     uint32_t tail_snap = ring->ent_tail;
+    uint32_t head = ring->ent_head;
+    uint32_t pending = tail_snap - head;
+    if (pending > HVT_RING_SIZE)
+        errx(1, "Invalid guest network submission ring indices");
 
-    while (ring->ent_head != tail_snap) {
-        uint32_t batch_start = ring->ent_head;
+    /* Guest memory is not trusted, including the host-owned index fields.
+     * A bounded local count prevents a guest changing ent_head mid-batch
+     * from extending this loop or replaying old slots indefinitely. */
+    while (pending != 0) {
+        uint32_t batch_start = head;
         uint32_t processed = 0;
 
         /* Batch consecutive NET_WRITE entries */
-        while (ring->ent_head + processed != tail_snap) {
+        while (processed != pending) {
             uint32_t idx = (batch_start + processed) & HVT_RING_MASK;
             struct hvt_ring_entry *ent = &ring->entries[idx];
 
@@ -275,10 +292,15 @@ static inline void process_ring_commits(struct hvt *hvt, struct hvt_ring *ring)
                  */
                 if (processed > 0) {
                     hvt_wmb();
-                    ring->ent_head += processed;
+                    head += processed;
+                    pending -= processed;
+                    ring->ent_head = head;
                     processed = 0;
                 }
-                process_read_entry(hvt, ring, ent);
+                if (!process_read_entry(hvt, ring, ent, head))
+                    return;
+                head++;
+                pending--;
                 break; /* re-evaluate the outer loop */
             } else {
                 /* Unknown operation: include in the batch to skip */
@@ -288,7 +310,9 @@ static inline void process_ring_commits(struct hvt *hvt, struct hvt_ring *ring)
 
         if (processed > 0) {
             hvt_wmb();
-            ring->ent_head += processed;
+            head += processed;
+            pending -= processed;
+            ring->ent_head = head;
         }
     }
 }
