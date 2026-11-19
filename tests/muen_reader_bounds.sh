@@ -14,11 +14,6 @@ cat > "$tmp/test.c" <<'C'
 #include <sys/mman.h>
 #include <unistd.h>
 #include "reader.h"
-/* channel.c's inline function, with the same production semantics. */
-bool muen_channel_is_active(const struct muchannel *channel)
-{
-    return channel->hdr.epoch != MUCHANNEL_NULL_EPOCH;
-}
 int main(void)
 {
     struct muchannel_reader reader;
@@ -59,7 +54,8 @@ int main(void)
     return 0;
 }
 C
-"${CC:-cc}" -std=gnu11 -O2 -Wall -Wextra -Werror \
+"${CC:-cc}" -std=gnu11 -fgnu89-inline -ffreestanding -O2 -Wall -Wextra -Werror \
     -I "$root/include" -I "$root/bindings" -I "$root/bindings/muen" \
-    "$tmp/test.c" "${MUEN_READER_SOURCE:-$root/bindings/muen/reader.c}" -o "$tmp/check"
+    "$tmp/test.c" "${MUEN_READER_SOURCE:-$root/bindings/muen/reader.c}" \
+    "$root/bindings/muen/channel.c" -o "$tmp/check"
 "$tmp/check"
