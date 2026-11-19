@@ -62,8 +62,8 @@ struct hvt {
 };
 
 /*
- * Check that (gpa) and (gpa + sz) are within guest memory. Returns a host-side
- * pointer to (gpa) if successful, aborts if not.
+ * Check that the half-open guest range [gpa, gpa + sz) is within guest
+ * memory. Returns a host-side pointer to (gpa) if successful, aborts if not.
  */
 #define HVT_CHECKED_GPA_P(hvt, gpa, sz)                                        \
     hvt_checked_gpa_p((hvt), (gpa), (sz), __FILE__, __LINE__)
@@ -74,7 +74,7 @@ inline void *hvt_checked_gpa_p(struct hvt *hvt, hvt_gpa_t gpa, size_t sz,
     hvt_gpa_t r;
 
     if ((gpa >= hvt->guest_mem_size) || add_overflow(gpa, sz, r) ||
-        (r >= hvt->guest_mem_size)) {
+        (r > hvt->guest_mem_size)) {
         errx(1, "%s:%d: Invalid guest access: gpa=0x%" PRIx64 ", sz=%zu", file,
              line, gpa, sz);
     } else {
