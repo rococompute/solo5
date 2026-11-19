@@ -212,7 +212,7 @@ static int send_char(char ch)
     return send(socket_fd, &ch, 1, 0);
 }
 
-static char recv_char(void)
+static int recv_char(void)
 {
     unsigned char ch;
     int ret;
@@ -232,7 +232,7 @@ static char recv_char(void)
     /* All GDB remote packets are encoded in ASCII. */
     assert(isascii(ch));
 
-    return (char)ch;
+    return ch;
 }
 
 /*
@@ -244,7 +244,7 @@ static char *recv_packet(void)
     char *buffer = &in_buffer[0];
     unsigned char checksum;
     unsigned char xmitcsum;
-    char ch;
+    int ch;
     int count;
 
     while (1) {
@@ -352,7 +352,7 @@ static void send_packet_no_ack(const char *buffer)
  */
 static void send_packet(const char *buffer)
 {
-    char ch;
+    int ch;
 
     for (;;) {
         send_packet_no_ack(buffer);

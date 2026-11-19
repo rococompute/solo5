@@ -16,14 +16,6 @@
 
 #include "hvt.h"
 
-/*
- * hvt.h provides a C99 inline definition without an external definition.
- * Request an external definition so this translation unit can call the real
- * function directly at any optimisation level.
- */
-extern inline void *hvt_checked_gpa_p(struct hvt *hvt, hvt_gpa_t gpa,
-                                      size_t sz, const char *file, int line);
-
 #define GUEST_SIZE 65536
 
 static unsigned char guest_mem[GUEST_SIZE];
