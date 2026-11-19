@@ -378,6 +378,9 @@ static void test_dhcp_and_broadcast(void)
     len = frame_udp(f, ip4(192, 168, 64, 10), broadcast, 138, 137);
     check(!policy_allows(&p, f, len, 0), "NetBIOS broadcast denied");
     len = frame_udp(f, ip4(192, 168, 64, 10), broadcast, 5353, 5353);
+    check(!policy_allows(&p, f, len, 0),
+          "mDNS port on limited broadcast denied");
+    len = frame_udp(f, ip4(192, 168, 64, 10), ip4(224, 0, 0, 251), 5353, 5353);
     check(!policy_allows(&p, f, len, 0), "mDNS multicast denied");
     len = frame_udp(f, ip4(192, 168, 64, 10), broadcast, 1234, 67);
     check(!policy_allows(&p, f, len, 0),
