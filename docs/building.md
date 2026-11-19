@@ -280,6 +280,17 @@ sends goes through `solo5-vmnet`, which can restrict where it may go:
 solo5-vmnet --allow=203.0.113.0/24:443 -- solo5-hvt -- unikernel.hvt
 ```
 
+A rule is `A.B.C.D[/PREFIX][:PORT]` with `PREFIX` in 0–32 and `PORT` in
+1–65535. Numbers are plain decimal digits; whitespace, signs, empty fields and
+trailing characters are rejected rather than ignored. Without `:PORT` a rule
+matches every protocol to the CIDR; with it, only TCP/UDP traffic to that
+destination port matches. Even when rules are present, ARP, DHCP client
+traffic (UDP source 68 to destination 67, both the initial limited broadcast
+and unicast renewal) and UDP DNS to the vmnet gateway's resolver are allowed.
+A limited broadcast (255.255.255.255) is not exempt by itself: other traffic
+to it needs a matching rule. Later IPv4 fragments carry no transport header,
+so a port-specific rule drops them.
+
 Other options: `--mode=host` (host-only network, no NAT), `--isolate` (no
 traffic with other vmnet guests) and `--verbose` (log dropped packets).
 
@@ -311,6 +322,12 @@ pool is intended for a single Mac, not a shared network filesystem. Removing
 pool state discards identities and can recreate DHCP churn, so do not clear it
 as routine build cleanup. `--verbose` reports the selected slot and whether
 its identity was reused.
+
+The egress parser and filter live in `tenders/vmnet/policy.h` and are
+portable. On any host, including Linux, run
+`make -C tests/vmnet_policy check` to test malformed rules, IPv4 framing and
+fragments, DHCP and unrelated broadcasts against the same code the launcher
+uses. Full launcher, code-signing and real-vmnet checks still require macOS.
 
 On macOS, validate allocation, backpressure, reuse, corruption handling and
 crash recovery with `python3 tests/vmnet_pool/test_pool.py` after `make`.

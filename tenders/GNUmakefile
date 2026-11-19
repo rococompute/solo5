@@ -139,13 +139,18 @@ hvt/solo5-hvt-debug: $(hvt_debug_OBJS) $(common_LIB)
 ifeq ($(CONFIG_HOST), Darwin)
 all_TARGETS += vmnet/solo5-vmnet
 
-vmnet/solo5-vmnet: vmnet/solo5-vmnet.c vmnet/pool.h
+vmnet/solo5-vmnet: vmnet/solo5-vmnet.c vmnet/policy.h vmnet/pool.h
 	@echo "HOSTCC $@"
 	$(HOSTCC) $(HOSTCFLAGS) -o $@ $< -framework vmnet
 	@echo "CODESIGN $@"
 	codesign --force --sign - \
 	    --entitlements vmnet/solo5-vmnet.entitlements $@
 endif
+
+# The egress policy parser and filter are portable; test them on any host.
+.PHONY: check-vmnet-policy
+check-vmnet-policy:
+	$(MAKE) -C $(TOPDIR)/tests/vmnet_policy check
 
 endif # CONFIG_HVT_TENDER
 

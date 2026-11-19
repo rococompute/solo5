@@ -74,20 +74,14 @@
 #include <unistd.h>
 #include <vmnet/vmnet.h>
 
+#include "policy.h"
 #include "pool.h"
 
 #define SOCKBUF_SIZE (1 << 20)
-#define MAX_RULES    64
 #define BATCH        32
 #define CHILD_FD     3
 
-struct rule {
-    uint32_t net, mask; /* host byte order */
-    uint16_t port;      /* 0: any */
-};
-
-static struct rule rules[MAX_RULES];
-static int nrules;
+static struct egress_policy policy;
 static bool verbose;
 static uint32_t gateway_ip; /* host byte order, 0 if unknown */
 static int sock = -1;
@@ -108,84 +102,12 @@ static void usage(void)
     exit(2);
 }
 
-static void parse_rule(const char *arg)
-{
-    char buf[64];
-    if (nrules == MAX_RULES)
-        errx(2, "too many --allow rules");
-    if (strlen(arg) >= sizeof buf)
-        errx(2, "--allow=%s: too long", arg);
-    strcpy(buf, arg);
-
-    struct rule *r = &rules[nrules];
-    char *port = strchr(buf, ':');
-    if (port) {
-        *port++ = 0;
-        long p = strtol(port, NULL, 10);
-        if (p <= 0 || p > 65535)
-            errx(2, "--allow=%s: bad port", arg);
-        r->port = (uint16_t)p;
-    }
-    int bits = 32;
-    char *slash = strchr(buf, '/');
-    if (slash) {
-        *slash++ = 0;
-        bits = atoi(slash);
-        if (bits < 0 || bits > 32)
-            errx(2, "--allow=%s: bad prefix length", arg);
-    }
-    struct in_addr a;
-    if (inet_pton(AF_INET, buf, &a) != 1)
-        errx(2, "--allow=%s: bad IPv4 address", arg);
-    r->mask = bits ? htonl(~0U << (32 - bits)) : 0;
-    r->mask = ntohl(r->mask);
-    r->net = ntohl(a.s_addr) & r->mask;
-    nrules++;
-}
-
 /*
  * Egress policy. Returns true if the frame the guest sent may go out.
  */
 static bool egress_allowed(const uint8_t *f, size_t len)
 {
-    if (nrules == 0)
-        return true;
-    if (len < 14)
-        return false;
-    uint16_t type = (uint16_t)(f[12] << 8 | f[13]);
-    if (type == 0x0806) /* ARP */
-        return true;
-    if (type != 0x0800) /* IPv6 and anything else: denied */
-        return false;
-    if (len < 14 + 20)
-        return false;
-    const uint8_t *ip = f + 14;
-    size_t ihl = (size_t)(ip[0] & 0x0f) * 4;
-    if ((ip[0] >> 4) != 4 || ihl < 20 || len < 14 + ihl)
-        return false;
-    uint8_t proto = ip[9];
-    uint32_t dst = (uint32_t)ip[16] << 24 | (uint32_t)ip[17] << 16 |
-                   (uint32_t)ip[18] << 8 | ip[19];
-    uint16_t dport = 0;
-    bool first_fragment = ((ip[6] & 0x1f) | ip[7]) == 0;
-    if ((proto == 6 || proto == 17) && len >= 14 + ihl + 4 && first_fragment)
-        dport = (uint16_t)(ip[ihl + 2] << 8 | ip[ihl + 3]);
-
-    /* DHCP, and DNS to the gateway's resolver. */
-    if (proto == 17 && (dport == 67 || dst == 0xffffffff))
-        return true;
-    if (gateway_ip && dst == gateway_ip && proto == 17 && dport == 53)
-        return true;
-
-    for (int i = 0; i < nrules; i++) {
-        if ((dst & rules[i].mask) != rules[i].net)
-            continue;
-        if (rules[i].port == 0)
-            return true;
-        if ((proto == 6 || proto == 17) && dport == rules[i].port)
-            return true;
-    }
-    return false;
+    return policy_allows(&policy, f, len, gateway_ip);
 }
 
 static void log_drop(const uint8_t *f, size_t len)
@@ -276,7 +198,9 @@ int main(int argc, char **argv)
         } else if (strcmp(a, "--isolate") == 0) {
             isolate = true;
         } else if (strncmp(a, "--allow=", 8) == 0) {
-            parse_rule(a + 8);
+            const char *error;
+            if (!policy_parse_rule(&policy, a + 8, &error))
+                errx(2, "--allow=%s: %s", a + 8, error);
         } else if (strcmp(a, "--verbose") == 0) {
             verbose = true;
         } else if (strncmp(a, "--pool-dir=", 11) == 0) {
@@ -392,7 +316,7 @@ int main(int argc, char **argv)
         fprintf(stderr, "solo5-vmnet: %s mode, mac %s, mtu %llu, %d egress "
                         "rule(s)\n",
                 mode == VMNET_SHARED_MODE ? "shared" : "host", mac,
-                (unsigned long long)mtu, nrules);
+                (unsigned long long)mtu, policy.nrules);
 
     pid_t pid = fork();
     if (pid == -1)
