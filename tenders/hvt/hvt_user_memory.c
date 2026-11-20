@@ -72,34 +72,40 @@ static void grant(struct hvt *hvt, struct mft_entry *e, uint64_t start,
     uint64_t end;
 
     if (add_overflow(start, size, end))
-        errx(1, "User memory '%s': address 0x%" PRIx64 " + size 0x%" PRIx64
-                " overflows",
+        errx(1,
+             "User memory '%s': address 0x%" PRIx64 " + size 0x%" PRIx64
+             " overflows",
              e->name, start, size);
     if (start < HVT_GUEST_MIN_BASE)
-        errx(1, "User memory '%s' at 0x%" PRIx64 " is below 0x%x, where the "
-                "boot information and page tables are",
+        errx(1,
+             "User memory '%s' at 0x%" PRIx64 " is below 0x%x, where the "
+             "boot information and page tables are",
              e->name, start, HVT_GUEST_MIN_BASE);
     if (end > hvt->guest_mem_size)
-        errx(1, "User memory '%s' [0x%" PRIx64 ", 0x%" PRIx64 ") ends past "
-                "guest memory (0x%zx bytes); give the tender more memory "
-                "with --mem",
+        errx(1,
+             "User memory '%s' [0x%" PRIx64 ", 0x%" PRIx64 ") ends past "
+             "guest memory (0x%zx bytes); give the tender more memory "
+             "with --mem",
              e->name, start, end, hvt->guest_mem_size);
     if (overlaps(start, end, image_start, image_end))
-        errx(1, "User memory '%s' [0x%" PRIx64 ", 0x%" PRIx64 ") overlaps "
-                "the unikernel's image [0x%" PRIx64 ", 0x%" PRIx64 ")",
+        errx(1,
+             "User memory '%s' [0x%" PRIx64 ", 0x%" PRIx64 ") overlaps "
+             "the unikernel's image [0x%" PRIx64 ", 0x%" PRIx64 ")",
              e->name, start, end, image_start, image_end);
     for (unsigned i = 0; i != n_granted; i++) {
         uint64_t g_start = granted[i]->u.user_memory.address;
         uint64_t g_end = g_start + granted[i]->u.user_memory.size;
         if (overlaps(start, end, g_start, g_end))
-            errx(1, "User memory '%s' [0x%" PRIx64 ", 0x%" PRIx64 ") overlaps "
-                    "user memory '%s' [0x%" PRIx64 ", 0x%" PRIx64 ")",
+            errx(1,
+                 "User memory '%s' [0x%" PRIx64 ", 0x%" PRIx64 ") overlaps "
+                 "user memory '%s' [0x%" PRIx64 ", 0x%" PRIx64 ")",
                  e->name, start, end, granted[i]->name, g_start, g_end);
     }
     if (hvt_guest_mprotect(hvt, start, end,
                            PROT_READ | PROT_WRITE | PROT_EXEC) == -1)
-        errx(1, "User memory '%s' [0x%" PRIx64 ", 0x%" PRIx64 "): could not "
-                "map it executable",
+        errx(1,
+             "User memory '%s' [0x%" PRIx64 ", 0x%" PRIx64 "): could not "
+             "map it executable",
              e->name, start, end);
 
     e->u.user_memory.address = start;
@@ -131,9 +137,10 @@ void hvt_user_memory_attach(struct hvt *hvt, struct mft *mft,
                 continue;
             if (size == 0 || (size & (MFT_USER_MEMORY_ALIGN - 1)) ||
                 (address & (MFT_USER_MEMORY_ALIGN - 1)))
-                errx(1, "User memory '%s': address 0x%" PRIx64 " and size "
-                        "0x%" PRIx64 " must be non-zero multiples of 0x%x "
-                        "(address 0: placed by the tender)",
+                errx(1,
+                     "User memory '%s': address 0x%" PRIx64 " and size "
+                     "0x%" PRIx64 " must be non-zero multiples of 0x%x "
+                     "(address 0: placed by the tender)",
                      e->name, address, size, MFT_USER_MEMORY_ALIGN);
             if (!fixed)
                 address = align_up(heap_start, USER_MEMORY_PLACE_ALIGN);
@@ -148,8 +155,9 @@ void hvt_user_memory_attach(struct hvt *hvt, struct mft *mft,
     if (n_granted > 0 &&
         (heap_start > hvt->guest_mem_size ||
          hvt->guest_mem_size - heap_start < HVT_GUEST_MIN_FREE))
-        errx(1, "User memory leaves less than %d KB above 0x%" PRIx64
-                " for the unikernel's heap and stack; give the tender more "
-                "memory with --mem",
+        errx(1,
+             "User memory leaves less than %d KB above 0x%" PRIx64
+             " for the unikernel's heap and stack; give the tender more "
+             "memory with --mem",
              HVT_GUEST_MIN_FREE >> 10, heap_start);
 }

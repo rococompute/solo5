@@ -44,7 +44,9 @@ static const uint32_t code[] = {0x52800540, 0xd65f03c0};
 static void sync_code(void *p)
 {
     __asm__ __volatile__("dc cvau, %0; dsb ish; ic ivau, %0; dsb ish; isb"
-                         : : "r"(p) : "memory");
+                         :
+                         : "r"(p)
+                         : "memory");
 }
 #elif defined(__x86_64__)
 /* mov eax, 42; ret */
@@ -101,8 +103,7 @@ int solo5_app_main(const struct solo5_start_info *si)
     }
     /* Code runs anywhere in each region. */
     if (!runs(fixed.address) || !runs(fixed.address + fixed.size - 0x1000) ||
-        !runs(placed.address) ||
-        !runs(placed.address + placed.size - 0x1000)) {
+        !runs(placed.address) || !runs(placed.address + placed.size - 0x1000)) {
         puts("code in user memory did not run\n");
         return 1;
     }

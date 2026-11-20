@@ -132,8 +132,7 @@ static void valid_dev_type(const char *data, const char *source, size_t line)
     /* The json parsing ensures data is NUL-terminated. */
     if (strcmp(data, "NET_BASIC") != 0 && strcmp(data, "BLOCK_BASIC") != 0 &&
         strcmp(data, "USER_MEMORY") != 0)
-        errx(1,
-             "%s:%zu type %s is not NET_BASIC, BLOCK_BASIC or USER_MEMORY",
+        errx(1, "%s:%zu type %s is not NET_BASIC, BLOCK_BASIC or USER_MEMORY",
              source, line, data);
 }
 
@@ -250,8 +249,7 @@ static int elftool_gen_mft(const char *source, const char *output)
             if (jsize == NULL)
                 errx(1, "%s:%zu: .devices[...]: USER_MEMORY needs a .size",
                      source, (*i)->line);
-            unsigned long long size =
-                valid_user_memory(jsize, "size", source);
+            unsigned long long size = valid_user_memory(jsize, "size", source);
             if (size == 0)
                 errx(1, "%s:%zu: .devices[...]: .size may not be 0", source,
                      jsize->line);
