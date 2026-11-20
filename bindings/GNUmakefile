@@ -42,27 +42,28 @@ stub_SRCS := stub/stubs.c
 
 hvt_SRCS := hvt/start.c $(common_SRCS) $(common_hvt_SRCS) hvt/time.c \
     hvt/platform_lifecycle.c hvt/yield.c hvt/tscclock.c hvt/console.c \
-    hvt/net.c hvt/block.c hvt/random.c
+    hvt/net.c hvt/block.c hvt/random.c hvt/user_memory.c
 
 spt_SRCS := spt/start.c \
     abort.c crt.c printf.c lib.c mem.c exit.c log.c cmdline.c tls.c mft.c \
     spt/bindings.c spt/block.c spt/net.c spt/platform.c \
-    spt/sys_linux_$(CONFIG_TARGET_ARCH).c
+    spt/sys_linux_$(CONFIG_TARGET_ARCH).c user_memory_none.c
 
 virtio_SRCS := virtio/boot.S virtio/start.c $(common_SRCS) \
     virtio/platform.c virtio/platform_intr.c \
     virtio/pci.c virtio/serial.c virtio/time.c virtio/virtio_ring.c \
     virtio/virtio_net.c virtio/virtio_blk.c virtio/tscclock.c \
-    virtio/clock_subr.c virtio/pvclock.c virtio/acpi.c
+    virtio/clock_subr.c virtio/pvclock.c virtio/acpi.c user_memory_none.c
 
 muen_SRCS := muen/start.c $(common_SRCS) $(common_hvt_SRCS) \
     muen/channel.c muen/reader.c muen/writer.c muen/muen-block.c \
     muen/muen-clock.c muen/muen-console.c muen/muen-net.c \
-    muen/muen-platform_lifecycle.c muen/muen-yield.c muen/muen-sinfo.c
+    muen/muen-platform_lifecycle.c muen/muen-yield.c muen/muen-sinfo.c \
+    user_memory_none.c
 
 xen_SRCS := xen/boot.S xen/start.c $(common_SRCS) \
     xen/hypercall_page.S xen/console.c xen/platform.c xen/platform_intr.c \
-    xen/evtchn.c xen/time.c xen/pvclock.c xen/stubs.c
+    xen/evtchn.c xen/time.c xen/pvclock.c xen/stubs.c user_memory_none.c
 
 CPPFLAGS+=-D__SOLO5_BINDINGS__
 CPPFLAGS+=-ffile-prefix-map=${TOPDIR}=.

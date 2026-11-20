@@ -374,4 +374,37 @@ solo5_result_t solo5_block_write(solo5_handle_t handle, solo5_off_t offset,
 solo5_result_t solo5_block_read(solo5_handle_t handle, solo5_off_t offset,
                                 uint8_t *buf, size_t size);
 
+/*
+ * User memory.
+ */
+
+struct solo5_user_memory_info {
+    uintptr_t address; /* Guest-physical address of the region */
+    size_t size; /* Size of the region, bytes */
+};
+
+/*
+ * Gets the user memory region declared as (name) in the application manifest
+ * (type USER_MEMORY), storing where it is in (*info).
+ *
+ * User memory is set aside for programs the application runs on top of
+ * itself: the heap given to solo5_app_main() never includes it, and, unlike
+ * the rest of the application's memory, it may hold code that is executed.
+ * It is readable, writable and executable; the application enforces whatever
+ * finer protections its programs need with its own page tables. The manifest
+ * either fixes the region's address or leaves it to the tender, which places
+ * it above the application's image, below the heap.
+ *
+ * Returns SOLO5_R_EINVAL if the manifest declares no user memory (name), and
+ * SOLO5_R_EUNSPEC on targets without user memory (all but hvt).
+ */
+solo5_result_t solo5_user_memory_acquire(const char *name,
+                                         struct solo5_user_memory_info *info);
+
+/*
+ * Defined if this solo5.h declares solo5_user_memory_acquire(), so that code
+ * can be built against older Solo5 headers too.
+ */
+#define SOLO5_HAVE_USER_MEMORY 1
+
 #endif

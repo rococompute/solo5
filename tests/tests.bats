@@ -640,6 +640,44 @@ hostile_run() {
   [ "$status" -eq 1 ]
 }
 
+@test "user_memory hvt" {
+  hvt_run --mem=64 -- test_user_memory/test_user_memory.hvt
+  expect_success
+}
+
+@test "user_memory exec_heap hvt" {
+  skip_unless_host_is Darwin
+  REPORT=${BATS_TMPDIR}/exit-report.json
+  run ${TIMEOUT} --foreground 60s "${HVT_TENDER}" --mem=64 --exit-report=3 \
+    -- test_user_memory/test_user_memory.hvt exec_heap 3>${REPORT}
+  REPORT_JSON=$(cat ${REPORT})
+  echo "exit report: ${REPORT_JSON}"
+  [[ "${REPORT_JSON}" == *'"reason":"translation_fault"'* ]]
+  [ "$status" -eq 1 ]
+}
+
+@test "user_memory past guest memory hvt" {
+  hvt_run --mem=16 -- test_user_memory/test_user_memory.hvt
+  [ "$status" -eq 1 ] && \
+    [[ "$output" == *"User memory 'fixed' [0x1000000, 0x1400000) ends past guest memory"* ]]
+}
+
+@test "user_memory no heap left hvt" {
+  hvt_run --mem=28 -- test_user_memory/test_user_memory.hvt
+  [ "$status" -eq 1 ] && \
+    [[ "$output" == *"leaves less than 512 KB above 0x1c00000"* ]]
+}
+
+@test "user_memory over the image hvt" {
+  hvt_run -- test_user_memory_overlap/test_user_memory_overlap.hvt
+  [ "$status" -eq 1 ] && [[ "$output" == *"overlaps the unikernel's image"* ]]
+}
+
+@test "user_memory manifest elftool" {
+  run sh user_memory_manifest.sh
+  [ "$status" -eq 0 ] && [[ "$output" == *"PASS:"* ]]
+}
+
 @test "hostile hypercall_reserved hvt" {
   skip_unless_host_is Darwin
   hostile_run hypercall_reserved

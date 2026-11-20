@@ -255,8 +255,12 @@ codesign --force --sign - --entitlements tenders/hvt/solo5-hvt.entitlements solo
 **Isolation.** Guest memory is protected at stage 2 with a 4 KiB granule
 (available since macOS 26), so each ELF segment gets exactly its own
 permissions: code is execute-only, read-only data is read-only, and writable
-data is never executable. This is stricter than on Linux/KVM, where guest
-X/NX is not enforced. Before running the guest, the tender drops privileges
+data is never executable. Memory that is no ELF segment (the heap and stack)
+is not executable either. The one exception is user memory the unikernel
+declares in its manifest (`USER_MEMORY`, see
+[architecture.md](architecture.md)), which is mapped readable, writable and
+executable for the programs the unikernel runs. This is stricter than on
+Linux/KVM, where guest X/NX is not enforced. Before running the guest, the tender drops privileges
 with a deny-all `sandbox(7)` profile: it cannot open or create files, exec,
 fork, use the network or create new file descriptors; only the block and
 network devices it was given keep working.

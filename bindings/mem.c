@@ -46,6 +46,8 @@ void mem_init(void)
 
     mem_size = platform_mem_size();
     heap_start = ((uint64_t)&_end + PAGE_SIZE - 1) & PAGE_MASK;
+    /* User memory above the image comes before the heap. */
+    heap_start = user_memory_heap_start(heap_start, mem_size);
 
     /*
      * Cowardly refuse to run with less than 512KB of free memory.

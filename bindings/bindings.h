@@ -89,6 +89,14 @@ void intr_irq_handler(uint64_t irq);
 
 /* mem.c: low-level page alloc routines */
 void mem_init(void);
+
+/* user_memory.c (hvt) or user_memory_none.c (other targets) */
+/*
+ * The first address of the heap, given the first page above the image
+ * (heap_start): above every user memory region above the image. Panics if a
+ * region overlaps the image or leaves no heap.
+ */
+uint64_t user_memory_heap_start(uint64_t heap_start, uint64_t mem_size);
 void *mem_ialloc_pages(size_t num);
 void mem_lock_heap(uintptr_t *start, size_t *size);
 

@@ -137,6 +137,24 @@ void hvt_boot_info_init(struct hvt *hvt, hvt_gpa_t gpa_kend, int cmdline_argc,
 int hvt_guest_mprotect(void *t_arg, uint64_t addr_start, uint64_t addr_end,
                        int prot);
 
+/*
+ * Minimum amount of guest memory above the image (and any user memory above
+ * it) for the unikernel's heap and stack, 512KB. The bindings refuse to run
+ * with less (bindings/mem.c).
+ */
+#define HVT_GUEST_MIN_FREE 0x80000
+
+/*
+ * Attach the manifest's user memory regions (MFT_USER_MEMORY): check each
+ * request against guest memory and the unikernel's image, which occupies
+ * [image_start, image_end), place those that leave their address to the
+ * tender above the image, and make every region readable, writable and
+ * executable. Exits with an error naming the region if one cannot be
+ * granted. Must be called after the image is loaded and before module setup.
+ */
+void hvt_user_memory_attach(struct hvt *hvt, struct mft *mft,
+                            hvt_gpa_t image_start, hvt_gpa_t image_end);
+
 #if defined(HVT_DROP_PRIVILEGES) && HVT_DROP_PRIVILEGES == 1
 /*
  * Drop privileges. This function is called by the tender before entering the

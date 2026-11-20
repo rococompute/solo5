@@ -45,6 +45,7 @@
 typedef enum mft_type {
     MFT_DEV_BLOCK_BASIC = 1,
     MFT_DEV_NET_BASIC,
+    MFT_USER_MEMORY,
     MFT_RESERVED_FIRST = (1U << 30)
 } mft_type_t;
 
@@ -64,6 +65,35 @@ struct mft_net_basic {
     uint16_t mtu;
 };
 
+/*
+ * MFT_USER_MEMORY (user memory) properties.
+ *
+ * User memory is guest memory set aside for programs the unikernel runs on
+ * top of itself (a Linux personality's processes, say). The unikernel's own
+ * allocator never uses it, and, unlike the rest of guest memory, it may hold
+ * code: it is readable, writable and executable, and the unikernel enforces
+ * whatever finer protections its programs need with its own page tables.
+ *
+ * In the manifest built into the binary, (size) is the size requested and
+ * (address) the guest-physical address requested, or 0 for the tender to
+ * place the region above the unikernel's image. Both are multiples of
+ * MFT_USER_MEMORY_ALIGN. Once the tender has attached the entry, they are
+ * the region it granted.
+ */
+struct mft_user_memory {
+    uint64_t address;
+    uint64_t size;
+};
+
+#define MFT_USER_MEMORY_ALIGN 0x10000 /* 64 KiB, a page on any host */
+
+/*
+ * The union in struct mft_entry must keep its size: an older tender or
+ * elftool reads the same entries.
+ */
+_Static_assert(sizeof(struct mft_user_memory) <= sizeof(struct mft_block_basic),
+               "struct mft_user_memory would change struct mft_entry");
+
 #define MFT_NAME_SIZE 68 /* Bytes, including string terminator */
 #define MFT_NAME_MAX  67 /* Characters */
 
@@ -76,6 +106,7 @@ struct mft_entry {
     union {
         struct mft_block_basic block_basic;
         struct mft_net_basic net_basic;
+        struct mft_user_memory user_memory;
     } u;
     union {
         int hostfd; /* Backing host descriptor OR */

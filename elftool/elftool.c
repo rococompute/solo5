@@ -94,6 +94,10 @@ static const char out_header[] =
 
 static const char out_entry[] = "    { .name = \"%s\", .type = MFT_DEV_%s },\n";
 
+static const char out_user_memory[] =
+    "    { .name = \"%s\", .type = MFT_USER_MEMORY,\n"
+    "      .u = { .user_memory = { .address = 0x%llx, .size = 0x%llx } } },\n";
+
 static const char out_footer[] = "  }\n"
                                  "}\n"
                                  "MFT1_NOTE_DECLARE_END\n";
@@ -126,9 +130,25 @@ static void valid_dev_name(const char *data, const char *source, size_t line)
 static void valid_dev_type(const char *data, const char *source, size_t line)
 {
     /* The json parsing ensures data is NUL-terminated. */
-    if (!(strcmp(data, "NET_BASIC") || strcmp(data, "BLOCK_BASIC")))
-        errx(1, "%s:%zu type %s is neither NET_BASIC nor BLOCK_BASIC", source,
-             line, data);
+    if (strcmp(data, "NET_BASIC") != 0 && strcmp(data, "BLOCK_BASIC") != 0 &&
+        strcmp(data, "USER_MEMORY") != 0)
+        errx(1,
+             "%s:%zu type %s is not NET_BASIC, BLOCK_BASIC or USER_MEMORY",
+             source, line, data);
+}
+
+/*
+ * A USER_MEMORY entry's .size (required) or .address (optional, 0 or absent
+ * for the tender to place it): a non-negative integer, a multiple of
+ * MFT_USER_MEMORY_ALIGN.
+ */
+static unsigned long long valid_user_memory(jvalue *v, const char *key,
+                                            const char *source)
+{
+    if (v->u.i < 0 || (v->u.i & (MFT_USER_MEMORY_ALIGN - 1)) != 0)
+        errx(1, "%s:%zu: .devices[...]: .%s must be a multiple of %d bytes",
+             source, v->line, key, MFT_USER_MEMORY_ALIGN);
+    return (unsigned long long)v->u.i;
 }
 
 static int elftool_gen_mft(const char *source, const char *output)
@@ -198,7 +218,8 @@ static int elftool_gen_mft(const char *source, const char *output)
     fprintf(ofp, out_header, SOLO5_VERSION, entries, entries);
     for (jvalue **i = jdevices->u.v; *i; ++i) {
         jexpect(jobject, *i, source, ".devices[]");
-        jvalue *jdevname = NULL, *jdevtype = NULL;
+        jvalue *jdevname = NULL, *jdevtype = NULL, *jsize = NULL,
+               *jaddress = NULL;
         for (jvalue **j = (*i)->u.v; *j; ++j) {
             if (strcmp((*j)->n, "name") == 0) {
                 jexpect(jstring, *j, source, ".devices[...]");
@@ -206,6 +227,12 @@ static int elftool_gen_mft(const char *source, const char *output)
             } else if (strcmp((*j)->n, "type") == 0) {
                 jexpect(jstring, *j, source, ".devices[...]");
                 jdevtype = *j;
+            } else if (strcmp((*j)->n, "size") == 0) {
+                jexpect(jint, *j, source, ".devices[...].size");
+                jsize = *j;
+            } else if (strcmp((*j)->n, "address") == 0) {
+                jexpect(jint, *j, source, ".devices[...].address");
+                jaddress = *j;
             } else
                 errx(1, "%s:%zu: .devices[...]: unknown key: %s", source,
                      (*j)->line, (*j)->n);
@@ -219,7 +246,26 @@ static int elftool_gen_mft(const char *source, const char *output)
         if (jdevtype == NULL)
             errx(1, "%s:%zu: .devices[...]: missing .type", source, (*i)->line);
         valid_dev_type(jdevtype->u.s, source, jdevtype->line);
-        fprintf(ofp, out_entry, jdevname->u.s, jdevtype->u.s);
+        if (strcmp(jdevtype->u.s, "USER_MEMORY") == 0) {
+            if (jsize == NULL)
+                errx(1, "%s:%zu: .devices[...]: USER_MEMORY needs a .size",
+                     source, (*i)->line);
+            unsigned long long size =
+                valid_user_memory(jsize, "size", source);
+            if (size == 0)
+                errx(1, "%s:%zu: .devices[...]: .size may not be 0", source,
+                     jsize->line);
+            unsigned long long address =
+                jaddress ? valid_user_memory(jaddress, "address", source) : 0;
+            fprintf(ofp, out_user_memory, jdevname->u.s, address, size);
+        } else {
+            if (jsize != NULL || jaddress != NULL)
+                errx(1,
+                     "%s:%zu: .devices[...]: only USER_MEMORY has a .size or "
+                     ".address",
+                     source, (*i)->line);
+            fprintf(ofp, out_entry, jdevname->u.s, jdevtype->u.s);
+        }
     }
     fprintf(ofp, out_footer);
 
@@ -263,9 +309,16 @@ static int elftool_query_mft(const char *binary)
             continue;
 
         valid_dev_name(mft->e[i].name, binary, 0);
-        printf("    { \"name\": \"%s\", \"type\": \"%s\" }%s\n", mft->e[i].name,
-               mft_type_to_string(mft->e[i].type),
-               (i == (mft->entries - 1) ? "" : ","));
+        printf("    { \"name\": \"%s\", \"type\": \"%s\"", mft->e[i].name,
+               mft_type_to_string(mft->e[i].type));
+        if (mft->e[i].type == MFT_USER_MEMORY) {
+            printf(", \"size\": %llu",
+                   (unsigned long long)mft->e[i].u.user_memory.size);
+            if (mft->e[i].u.user_memory.address != 0)
+                printf(", \"address\": %llu",
+                       (unsigned long long)mft->e[i].u.user_memory.address);
+        }
+        printf(" }%s\n", (i == (mft->entries - 1) ? "" : ","));
     }
 
     printf("  ]\n"

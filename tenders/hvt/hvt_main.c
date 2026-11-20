@@ -54,6 +54,24 @@ extern struct hvt_module __start_modules;
 extern struct hvt_module __stop_modules;
 #endif
 
+/*
+ * The ELF loader's protection callback, recording where the image starts (its
+ * lowest loaded segment) for the user memory checks.
+ */
+struct image_bounds {
+    struct hvt *hvt;
+    uint64_t start;
+};
+
+static int image_mprotect(void *arg, uint64_t addr_start, uint64_t addr_end,
+                          int prot)
+{
+    struct image_bounds *image = arg;
+    if (addr_start < image->start)
+        image->start = addr_start;
+    return hvt_guest_mprotect(image->hvt, addr_start, addr_end, prot);
+}
+
 static void setup_modules(struct hvt *hvt, struct mft *mft)
 {
     for (struct hvt_module *m = &__start_modules; m < &__stop_modules; m++) {
@@ -484,9 +502,12 @@ int main(int argc, char **argv)
 
     if (no_net_ring == 0)
         hvt_net_reserve_ring(hvt, mft);
+    struct image_bounds image = {.hvt = hvt, .start = UINT64_MAX};
     elf_load(elf_fd, elf_filename, hvt->mem, hvt->guest_mem_size,
-             HVT_GUEST_MIN_BASE, hvt_guest_mprotect, hvt, &gpa_ep, &gpa_kend);
+             HVT_GUEST_MIN_BASE, image_mprotect, &image, &gpa_ep, &gpa_kend);
     close(elf_fd); /* Done with ELF binary */
+
+    hvt_user_memory_attach(hvt, mft, image.start, gpa_kend);
 
     hvt_vcpu_init(hvt, gpa_ep);
 

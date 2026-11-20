@@ -115,8 +115,33 @@ of the device, eg. `frontend` for a network or `storage` for a block device.
 _NAME_ must be composed of alphanumeric characters only, and within 1..67
 characters in length.
 
-_TYPE_ is the type of device being declared, currently `BLOCK_BASIC` or
-`NET_BASIC`.
+_TYPE_ is the type of device being declared, currently `BLOCK_BASIC`,
+`NET_BASIC` or `USER_MEMORY`.
+
+`USER_MEMORY` (hvt only) is not a device but guest memory set aside for
+programs the unikernel runs on top of itself, such as the processes of a Linux
+personality:
+
+```jsonc
+{ "name": "guest", "type": "USER_MEMORY", "size": 3218079744 }
+{ "name": "guest", "type": "USER_MEMORY", "size": 3218079744, "address": 2097152 }
+```
+
+_size_ is in bytes. _address_ is the guest-physical address the region must
+have, for a unikernel whose programs need fixed addresses; without it, the
+tender places the region above the unikernel's image, on a 2 MB boundary. Both
+are multiples of 64 KiB. The tender checks the request when it loads the
+unikernel and refuses to run it, saying why, if the region would overlap the
+image or another region, start below 1 MB, end past guest memory (`--mem`), or
+leave less than 512 KB above it for the heap and stack. The unikernel gets the
+region with `solo5_user_memory_acquire()`. Its heap never includes the region
+and starts above any region above the image.
+
+Guest memory is otherwise never both writable and executable (see
+"Isolation" in [building.md](building.md) for hvt on macOS). User memory is: it is
+mapped readable, writable and executable, so that the unikernel can load
+programs into it and run them, and the unikernel is expected to enforce the
+protections its programs ask for with its own page tables.
 
 Note that there is a maximum limit of 63 user-specified devices in the manifest.
 

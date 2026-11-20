@@ -1,0 +1,8 @@
+{
+    "type": "solo5.manifest",
+    "version": 1,
+    "devices": [
+        { "name": "fixed", "type": "USER_MEMORY", "address": 16777216, "size": 4194304 },
+        { "name": "placed", "type": "USER_MEMORY", "size": 8388608 }
+    ]
+}

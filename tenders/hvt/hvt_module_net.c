@@ -64,9 +64,6 @@ static struct mft *host_mft;
 static volatile int io_thread_stop;
 static hvt_gpa_t reserved_ring_gpa;
 
-/* Minimum amount of memory, 512KB */
-#define HVT_GUEST_MIN_FREE 0x80000
-
 size_t hvt_net_mem_overhead(struct mft *mft)
 {
     for (unsigned i = 0; i != mft->entries; i++) {

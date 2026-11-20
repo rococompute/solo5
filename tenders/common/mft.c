@@ -73,8 +73,9 @@ int mft_validate(const struct mft *mft, size_t mft_size)
         /*
          * Sanitize private fields (to be used by the tender/bindings):
          *
-         * 1. .attached must be false (which implies that both .b and .u are
-         * uninitialised).
+         * 1. .attached must be false (which implies that .b is
+         * uninitialised, and so is .u, except for a USER_MEMORY entry's
+         * request, which the tender checks when it attaches the entry).
          */
         if (mft->e[i].attached != false)
             return -1;
@@ -127,6 +128,8 @@ const char *mft_type_to_string(mft_type_t type)
         return "BLOCK_BASIC";
     case MFT_DEV_NET_BASIC:
         return "NET_BASIC";
+    case MFT_USER_MEMORY:
+        return "USER_MEMORY";
     case MFT_RESERVED_FIRST:
         return "RESERVED_FIRST";
     default:

@@ -40,6 +40,7 @@ void _start(const void *arg)
     log(INFO, "____/\\___/ _|\\___/____/\n");
     log(INFO, "Solo5: Bindings version %s\n", SOLO5_VERSION);
 
+    user_memory_init(arg);
     mem_init();
     time_init(arg);
     block_init(arg);
