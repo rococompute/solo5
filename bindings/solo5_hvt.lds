@@ -25,7 +25,11 @@
  * are unexpected input sections not named here, the result will probably not be
  * correct.
  */
-TEXT_START = 0x100000;
+/*
+ * The image starts at 1 MB, or where the toolchain's
+ * '-z solo5-text-start=ADDR' asks (toolchain/cc.in).
+ */
+TEXT_START = DEFINED(__solo5_text_start) ? __solo5_text_start : 0x100000;
 
 ENTRY(_start)
 

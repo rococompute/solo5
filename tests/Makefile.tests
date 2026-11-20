@@ -46,7 +46,7 @@ all_TARGETS += $(test_NAME).stub
 ifdef CONFIG_HVT
 %.hvt: %.o manifest.o
 	@echo "CCLD $@"
-	$(CC) -z solo5-abi=hvt $< manifest.o -o $@
+	$(CC) -z solo5-abi=hvt $(test_HVT_LDFLAGS) $< manifest.o -o $@
 
 all_TARGETS += $(test_NAME).hvt
 endif

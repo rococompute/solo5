@@ -1,0 +1,7 @@
+{
+    "type": "solo5.manifest",
+    "version": 1,
+    "devices": [
+        { "name": "guest", "type": "USER_MEMORY", "address": 2097152, "size": 265289728 }
+    ]
+}

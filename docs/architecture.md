@@ -128,7 +128,9 @@ personality:
 ```
 
 _size_ is in bytes. _address_ is the guest-physical address the region must
-have, for a unikernel whose programs need fixed addresses; without it, the
+have, for a unikernel whose programs need fixed addresses (it can link itself
+higher with the toolchain's `-z solo5-text-start=0xADDR`, leaving the memory
+below free for them); without it, the
 tender places the region above the unikernel's image, on a 2 MB boundary. Both
 are multiples of 64 KiB. The tender checks the request when it loads the
 unikernel and refuses to run it, saying why, if the region would overlap the

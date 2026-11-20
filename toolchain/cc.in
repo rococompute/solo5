@@ -28,6 +28,10 @@
 # linking. ABI defaults to 'stub' to accomodate non-Solo5-aware build systems,
 # such as GNU autoconf, which use 'cc'-as-linker to test for the presence of
 # symbols.
+#
+# With the hvt ABI, '-z solo5-text-start=0xADDR' links the unikernel at ADDR
+# instead of 1 MB, leaving the memory below it free (for user memory at fixed
+# addresses, see USER_MEMORY in docs/architecture.md).
 
 prog="$(basename $0)"
 I="$(realpath $0 | xargs dirname)/../include"
@@ -43,6 +47,7 @@ L="$(realpath $0 | xargs dirname)/../lib/@@CONFIG_TARGET_TRIPLE@@"
 M=link
 # cc as linker with no -z solo5-abi= defaults to stub
 B=stub
+T=
 Z=
 for arg do
     shift
@@ -52,6 +57,21 @@ for arg do
         case "$arg" in
             solo5-abi=*)
                 B="${arg##*=}"
+                continue
+                ;;
+            solo5-text-start=*)
+                T="${arg##*=}"
+                case "$T" in
+                    0x*[!0-9a-fA-F]*|0x)
+                        echo "$prog: -z solo5-text-start=$T: not a hexadecimal address (0x...)" 1>&2
+                        exit 1
+                        ;;
+                    0x*) ;;
+                    *)
+                        echo "$prog: -z solo5-text-start=$T: not a hexadecimal address (0x...)" 1>&2
+                        exit 1
+                        ;;
+                esac
                 continue
                 ;;
             *)
@@ -87,6 +107,10 @@ case ${M} in
             "$@"
         ;;
     link)
+        if [ -n "${T}" ]; then
+            [ "${B}" = hvt ] || { echo "$prog: -z solo5-text-start needs -z solo5-abi=hvt" 1>&2; exit 1; }
+            T="-Wl,--defsym=__solo5_text_start=${T}"
+        fi
         [ -n "${B}" ] && B="-Wl,-T,solo5_${B}.lds -l :solo5_${B}.o"
         [ -n "${__V}" ] && set -x
         exec @@CONFIG_TARGET_CC@@ \
@@ -98,7 +122,7 @@ case ${M} in
             @@CONFIG_TARGET_CC_LDFLAGS@@ \
             -nostdlib \
             -L ${L} \
-            ${B} \
+            ${B} ${T} \
             -z max-page-size=@@CONFIG_TARGET_LD_MAX_PAGE_SIZE@@ \
             -static \
             "$@"

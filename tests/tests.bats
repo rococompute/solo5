@@ -673,6 +673,16 @@ hostile_run() {
   [ "$status" -eq 1 ] && [[ "$output" == *"overlaps the unikernel's image"* ]]
 }
 
+@test "user_memory below a high image hvt" {
+  hvt_run --mem=512 -- test_user_memory_high/test_user_memory_high.hvt
+  expect_success
+}
+
+@test "toolchain solo5-text-start" {
+  run sh toolchain_text_start.sh
+  [ "$status" -eq 0 ] && [[ "$output" == *"PASS:"* ]]
+}
+
 @test "user_memory manifest elftool" {
   run sh user_memory_manifest.sh
   [ "$status" -eq 0 ] && [[ "$output" == *"PASS:"* ]]
